@@ -1109,13 +1109,11 @@ function renderInventoryResults(
         return;
     }
 
-    result.style.display = "block";
+   result.style.display = "block";
 
-    if (!pallets.length) {
+if (!pallets.length) {
 
-    if (!pallets.length) {
-
-        result.innerHTML = `
+    result.innerHTML = `
             <div class="empty-result">
                 No pallets found.
             </div>
