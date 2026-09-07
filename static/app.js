@@ -1,28 +1,66 @@
 let scanTarget = null;
-let scanner = null;
+let scannerControls = null;
+let scannerStream = null;
+let scanning = false;
 
 const $ = id => document.getElementById(id);
 
+
+/* =========================
+   TOAST
+========================= */
+
 function toast(msg) {
   const t = $("toast");
+
   t.textContent = msg;
   t.style.display = "block";
+
   clearTimeout(window.tt);
-  window.tt = setTimeout(() => t.style.display = "none", 2800);
+
+  window.tt = setTimeout(() => {
+    t.style.display = "none";
+  }, 2800);
 }
 
+
+/* =========================
+   API
+========================= */
+
 async function api(url, method = "GET", body = null) {
+
   const r = await fetch(url, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : null
+    method: method,
+
+    headers: body
+      ? { "Content-Type": "application/json" }
+      : {},
+
+    body: body
+      ? JSON.stringify(body)
+      : null
   });
 
   return await r.json();
 }
 
+
+/* =========================
+   CLEAR FIELDS
+========================= */
+
 function clearFields(...ids) {
-  ids.forEach(id => $(id).value = "");
+
+  ids.forEach(id => {
+
+    const el = $(id);
+
+    if (el) {
+      el.value = "";
+    }
+
+  });
 }
 
 
@@ -30,21 +68,31 @@ function clearFields(...ids) {
    TABS
 ========================= */
 
-document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+document
+  .querySelectorAll(".tab")
+  .forEach(button => {
 
-  document.querySelectorAll(".tab").forEach(x =>
-    x.classList.remove("active")
-  );
+    button.onclick = () => {
 
-  document.querySelectorAll(".page").forEach(x =>
-    x.classList.remove("active")
-  );
+      document
+        .querySelectorAll(".tab")
+        .forEach(x => {
+          x.classList.remove("active");
+        });
 
-  b.classList.add("active");
+      document
+        .querySelectorAll(".page")
+        .forEach(x => {
+          x.classList.remove("active");
+        });
 
-  $(b.dataset.page).classList.add("active");
+      button.classList.add("active");
 
-});
+      $(button.dataset.page)
+        .classList.add("active");
+    };
+
+  });
 
 
 /* =========================
@@ -53,16 +101,28 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
 
 async function putIn() {
 
-  const r = await api("/api/in", "POST", {
-    pallet_id: $("inPallet").value,
-    location: $("inLocation").value
-  });
+  const r = await api(
+    "/api/in",
+    "POST",
+    {
+      pallet_id:
+        $("inPallet").value.trim(),
+
+      location:
+        $("inLocation")
+          .value
+          .trim()
+          .toUpperCase()
+    }
+  );
+
 
   toast(
     r.ok
       ? "✓ " + r.message
       : "⚠ " + r.error
   );
+
 
   if (r.ok) {
 
@@ -76,7 +136,6 @@ async function putIn() {
     refreshStats();
 
     loadLocations();
-
   }
 }
 
@@ -87,16 +146,28 @@ async function putIn() {
 
 async function movePallet() {
 
-  const r = await api("/api/move", "POST", {
-    pallet_id: $("movePallet").value,
-    location: $("moveLocation").value
-  });
+  const r = await api(
+    "/api/move",
+    "POST",
+    {
+      pallet_id:
+        $("movePallet").value.trim(),
+
+      location:
+        $("moveLocation")
+          .value
+          .trim()
+          .toUpperCase()
+    }
+  );
+
 
   toast(
     r.ok
       ? "✓ " + r.message
       : "⚠ " + r.error
   );
+
 
   if (r.ok) {
 
@@ -110,7 +181,6 @@ async function movePallet() {
     refreshStats();
 
     loadLocations();
-
   }
 }
 
@@ -121,9 +191,15 @@ async function movePallet() {
 
 async function takeOut() {
 
-  const r = await api("/api/out", "POST", {
-    pallet_id: $("outPallet").value
-  });
+  const r = await api(
+    "/api/out",
+    "POST",
+    {
+      pallet_id:
+        $("outPallet").value.trim()
+    }
+  );
+
 
   toast(
     r.ok
@@ -131,16 +207,18 @@ async function takeOut() {
       : "⚠ " + r.error
   );
 
+
   if (r.ok) {
 
-    clearFields("outPallet");
+    clearFields(
+      "outPallet"
+    );
 
     $("outPallet").focus();
 
     refreshStats();
 
     loadLocations();
-
   }
 }
 
@@ -151,45 +229,76 @@ async function takeOut() {
 
 async function findPallet() {
 
-  const id = encodeURIComponent(
-    $("findPallet").value.trim()
-  );
+  const value =
+    $("findPallet")
+      .value
+      .trim();
 
-  if (!id) return;
 
-  const r = await api(
-    "/api/find/" + id
-  );
+  if (!value) {
+    return;
+  }
 
-  const el = $("findResult");
+
+  const id =
+    encodeURIComponent(value);
+
+
+  const r =
+    await api(
+      "/api/find/" + id
+    );
+
+
+  const el =
+    $("findResult");
+
 
   if (!r.ok) {
 
-    el.innerHTML =
-      `<div class="error">
+    el.innerHTML = `
+      <div class="error">
         ${r.error}
-      </div>`;
+      </div>
+    `;
 
     return;
-
   }
 
-  const p = r.pallet;
 
-  const hist = r.history.map(x =>
+  const p =
+    r.pallet;
 
-    `<tr>
-      <td>${x.action}</td>
-      <td>${x.old_location || "—"}</td>
-      <td>${x.new_location || "—"}</td>
-      <td>${x.timestamp}</td>
-    </tr>`
 
-  ).join("");
+  const hist =
+    r.history.map(x => `
 
-  el.innerHTML =
+      <tr>
 
-    `<div class="ok detail">
+        <td>
+          ${x.action}
+        </td>
+
+        <td>
+          ${x.old_location || "—"}
+        </td>
+
+        <td>
+          ${x.new_location || "—"}
+        </td>
+
+        <td>
+          ${x.timestamp}
+        </td>
+
+      </tr>
+
+    `).join("");
+
+
+  el.innerHTML = `
+
+    <div class="ok detail">
 
       <strong>
         📦 ${p.pallet_id}
@@ -198,12 +307,16 @@ async function findPallet() {
       <br>
 
       Status:
-      <b>${p.status}</b>
+      <b>
+        ${p.status}
+      </b>
 
       <br>
 
       📍 Location:
-      <b>${p.location || "OUT"}</b>
+      <b>
+        ${p.location || "OUT"}
+      </b>
 
       <br>
 
@@ -225,21 +338,36 @@ async function findPallet() {
       Brand:
       ${p.brand || "—"}
 
+
       <table>
 
         <tr>
-          <th>Action</th>
-          <th>From</th>
-          <th>To</th>
-          <th>Time</th>
+
+          <th>
+            Action
+          </th>
+
+          <th>
+            From
+          </th>
+
+          <th>
+            To
+          </th>
+
+          <th>
+            Time
+          </th>
+
         </tr>
 
         ${hist}
 
       </table>
 
-    </div>`;
+    </div>
 
+  `;
 }
 
 
@@ -249,40 +377,56 @@ async function findPallet() {
 
 async function findLocation() {
 
-  const loc = encodeURIComponent(
+  const value =
     $("locationSearch")
       .value
       .trim()
-      .toUpperCase()
-  );
+      .toUpperCase();
 
-  if (!loc) return;
 
-  const r = await api(
-    "/api/location/" + loc
-  );
+  if (!value) {
+    return;
+  }
+
+
+  const loc =
+    encodeURIComponent(value);
+
+
+  const r =
+    await api(
+      "/api/location/" + loc
+    );
+
 
   const el =
     $("locationResult");
 
+
   if (!r.ok) {
 
-    el.innerHTML =
-      `<div class="error">
+    el.innerHTML = `
+      <div class="error">
         ${r.error}
-      </div>`;
+      </div>
+    `;
 
     return;
-
   }
 
-  const x = r.location;
 
-  const p = r.pallet;
+  const x =
+    r.location;
 
-  el.innerHTML = p
+  const p =
+    r.pallet;
 
-    ? `<div class="ok detail">
+
+  if (p) {
+
+    el.innerHTML = `
+
+      <div class="ok detail">
 
         <strong>
           ${x.location_id}
@@ -298,20 +442,30 @@ async function findLocation() {
         <hr>
 
         📦 Pallet:
-        <b>${p.pallet_id}</b>
+
+        <b>
+          ${p.pallet_id}
+        </b>
 
         <br>
 
         ${p.product || ""}
 
-        ${p.lot
-          ? "• Lot " + p.lot
-          : ""
+        ${
+          p.lot
+            ? "• Lot " + p.lot
+            : ""
         }
 
-      </div>`
+      </div>
 
-    : `<div class="ok detail">
+    `;
+
+  } else {
+
+    el.innerHTML = `
+
+      <div class="ok detail">
 
         <strong>
           ${x.location_id}
@@ -328,8 +482,11 @@ async function findLocation() {
 
         ✅ <b>EMPTY</b>
 
-      </div>`;
+      </div>
 
+    `;
+
+  }
 }
 
 
@@ -340,7 +497,10 @@ async function findLocation() {
 async function loadLocations() {
 
   const rows =
-    await api("/api/locations");
+    await api(
+      "/api/locations"
+    );
+
 
   $("locationGrid").innerHTML =
 
@@ -348,9 +508,15 @@ async function loadLocations() {
 
     +
 
-    rows.map(x =>
+    rows.map(x => `
 
-      `<div class="loc ${x.pallet_id ? "occupied" : ""}">
+      <div
+        class="loc ${
+          x.pallet_id
+            ? "occupied"
+            : ""
+        }"
+      >
 
         <b>
           ${x.location_id}
@@ -364,14 +530,13 @@ async function loadLocations() {
             : "✅ Empty"
         }
 
-      </div>`
+      </div>
 
-    ).join("")
+    `).join("")
 
     +
 
     `</div>`;
-
 }
 
 
@@ -382,7 +547,10 @@ async function loadLocations() {
 async function refreshStats() {
 
   const s =
-    await api("/api/stats");
+    await api(
+      "/api/stats"
+    );
+
 
   $("occupied").textContent =
     s.occupied;
@@ -392,161 +560,463 @@ async function refreshStats() {
 
   $("total").textContent =
     s.total_locations;
-
 }
 
 
 /* =========================================
-   PHONE CAMERA BARCODE SCANNER
+   ZXING CAMERA BARCODE SCANNER
 ========================================= */
 
 async function openScanner(target) {
 
-  scanTarget = target;
+  /*
+    Save which input should receive
+    the barcode.
+  */
+
+  scanTarget =
+    target;
+
+
+  /*
+    Open scanner popup.
+  */
 
   $("scannerModal")
-    .classList.add("show");
+    .classList
+    .add("show");
 
-  if (scanner) return;
 
-  scanner =
-    new Html5Qrcode("reader");
+  /*
+    Do not start a second scanner.
+  */
+
+  if (scanning) {
+    return;
+  }
+
+
+  scanning =
+    true;
+
+
+  const reader =
+    $("reader");
+
+
+  /*
+    Create video preview.
+  */
+
+  reader.innerHTML = `
+
+    <div
+      style="
+        position:relative;
+        width:100%;
+        background:#000;
+        overflow:hidden;
+        border-radius:10px;
+      "
+    >
+
+      <video
+        id="barcodeVideo"
+        autoplay
+        playsinline
+        muted
+
+        style="
+          display:block;
+          width:100%;
+          height:auto;
+          max-height:65vh;
+          object-fit:cover;
+          background:#000;
+        "
+      >
+      </video>
+
+
+      <!-- Visual scan guide -->
+
+      <div
+        style="
+          position:absolute;
+          left:5%;
+          right:5%;
+          top:40%;
+          height:20%;
+          border:3px solid #00ff66;
+          border-radius:8px;
+          pointer-events:none;
+          box-sizing:border-box;
+        "
+      >
+      </div>
+
+    </div>
+
+
+    <div
+      style="
+        text-align:center;
+        padding:12px 5px 4px;
+        font-size:15px;
+        font-weight:600;
+      "
+    >
+
+      Put ONE barcode inside the green box
+
+    </div>
+
+  `;
+
 
   try {
 
     /*
-      Ask browser for available cameras.
-      This also lets us see the REAL error
-      instead of assuming it is permissions.
+      Make sure ZXing loaded.
     */
 
-    const cameras =
-      await Html5Qrcode.getCameras();
-
     if (
-      !cameras ||
-      cameras.length === 0
+      !window.ZXingBrowser
     ) {
 
       throw new Error(
-        "No camera was detected on this device."
+        "ZXing barcode library did not load."
       );
-
     }
 
 
-    /*
-      Try to find rear camera.
-    */
-
-    let camera =
-      cameras.find(c =>
-
-        /back|rear|environment/i
-          .test(c.label)
-
-      );
+    const video =
+      $("barcodeVideo");
 
 
     /*
-      If browser doesn't label cameras,
-      use the last camera in the list.
-      This is commonly the rear camera.
+      Ask for rear camera.
     */
 
-    if (!camera) {
+    const constraints = {
 
-      camera =
-        cameras[cameras.length - 1];
+      video: {
 
-    }
+        facingMode: {
+          ideal: "environment"
+        },
 
 
-    /*
-      Start barcode scanner.
-    */
+        width: {
+          ideal: 1920
+        },
 
-    await scanner.start(
 
-      camera.id,
-
-      {
-
-        fps: 15
+        height: {
+          ideal: 1080
+        }
 
       },
 
 
-      /* SUCCESS */
+      audio: false
 
-      text => {
-
-        if (!scanTarget) return;
-
-        const scannedValue =
-          String(text).trim();
-
-        $(scanTarget).value =
-          scannedValue;
+    };
 
 
-        /*
-          Vibrate phone when scan succeeds.
-        */
+    /*
+      ZXing Multi Format Reader.
 
-        if (navigator.vibrate) {
+      This supports common warehouse
+      barcode formats including:
 
-          navigator.vibrate(80);
+      Code 128
+      Code 39
+      Code 93
+      ITF
+      EAN
+      UPC
+      QR
+      Data Matrix
+      and others.
+    */
 
-        }
+    const codeReader =
+      new ZXingBrowser
+        .BrowserMultiFormatReader();
 
 
-        closeScanner();
+    /*
+      Begin continuous camera scanning.
+    */
+
+    scannerControls =
+      await codeReader
+        .decodeFromConstraints(
+
+          constraints,
+
+          video,
+
+          async (
+            result,
+            error,
+            controls
+          ) => {
+
+            /*
+              No barcode yet.
+
+              This happens constantly
+              while the camera is looking.
+            */
+
+            if (!result) {
+              return;
+            }
 
 
-        toast(
-          "✓ Scan captured: " +
-          scannedValue
+            /*
+              Barcode found.
+            */
+
+            let text = "";
+
+
+            try {
+
+              text =
+                result.getText();
+
+            }
+
+            catch (e) {
+
+              text =
+                result.text || "";
+
+            }
+
+
+            text =
+              String(text)
+                .trim();
+
+
+            if (!text) {
+              return;
+            }
+
+
+            /*
+              Stop scanner immediately
+              so the same barcode does
+              not scan repeatedly.
+            */
+
+            try {
+
+              if (controls) {
+                controls.stop();
+              }
+
+            }
+
+            catch (e) {}
+
+
+            scannerControls =
+              null;
+
+
+            scanning =
+              false;
+
+
+            /*
+              Put scanned value into
+              correct warehouse field.
+            */
+
+            const input =
+              $(scanTarget);
+
+
+            if (input) {
+
+              input.value =
+                text;
+
+            }
+
+
+            /*
+              Vibrate phone.
+            */
+
+            try {
+
+              if (
+                navigator.vibrate
+              ) {
+
+                navigator.vibrate(
+                  [100, 40, 100]
+                );
+
+              }
+
+            }
+
+            catch (e) {}
+
+
+            /*
+              Show success.
+            */
+
+            toast(
+              "✓ Barcode scanned: " +
+              text
+            );
+
+
+            /*
+              Close camera.
+            */
+
+            await closeScanner();
+
+
+            /*
+              Return focus to input.
+            */
+
+            if (input) {
+
+              input.focus();
+
+            }
+
+          }
+
         );
 
 
-        $(scanTarget).focus();
+    /*
+      Store camera stream.
+    */
 
-      },
+    scannerStream =
+      video.srcObject;
 
 
-      /* FAILED FRAME */
+    /*
+      Try to improve focus on supported
+      phone cameras.
+    */
 
-      errorMessage => {
+    try {
 
-        /*
-          This is NORMAL.
+      if (scannerStream) {
 
-          The camera continuously tries
-          frames until it finds a barcode.
+        const tracks =
+          scannerStream
+            .getVideoTracks();
 
-          We intentionally do nothing here.
-        */
+
+        if (
+          tracks &&
+          tracks.length
+        ) {
+
+          const track =
+            tracks[0];
+
+
+          const capabilities =
+            track.getCapabilities
+              ? track.getCapabilities()
+              : {};
+
+
+          /*
+            Continuous autofocus.
+          */
+
+          if (
+            capabilities.focusMode &&
+            capabilities.focusMode
+              .includes("continuous")
+          ) {
+
+            await track
+              .applyConstraints({
+
+                advanced: [
+                  {
+                    focusMode:
+                      "continuous"
+                  }
+                ]
+
+              });
+
+          }
+
+
+          /*
+            Prefer higher resolution
+            when supported.
+          */
+
+          try {
+
+            await track
+              .applyConstraints({
+
+                width: {
+                  ideal: 1920
+                },
+
+                height: {
+                  ideal: 1080
+                }
+
+              });
+
+          }
+
+          catch (e) {}
+
+        }
 
       }
 
-    );
+    }
 
+    catch (e) {
 
-  } catch (e) {
+      console.log(
+        "Advanced camera controls unavailable",
+        e
+      );
+
+    }
+
+  }
+
+  catch (e) {
 
     console.error(
-      "CAMERA ERROR:",
+      "SCANNER ERROR:",
       e
     );
 
 
-    /*
-      IMPORTANT:
+    scanning =
+      false;
 
-      Show the REAL error from the phone
-      instead of always saying permissions.
-    */
 
     let message =
       e && e.message
@@ -554,55 +1024,151 @@ async function openScanner(target) {
         : String(e);
 
 
-    $("reader").innerHTML =
+    reader.innerHTML = `
 
-      `<div class="error">
+      <div class="error">
 
-        <b>Camera error:</b>
+        <b>
+          Scanner could not start
+        </b>
 
         <br><br>
 
         ${message}
 
-      </div>`;
+        <br><br>
+
+        Make sure Safari has camera
+        permission for this website.
+
+      </div>
+
+    `;
 
   }
 
 }
 
 
-/* =========================
-   CLOSE CAMERA
-========================= */
+/* =========================================
+   CLOSE SCANNER
+========================================= */
 
 async function closeScanner() {
 
-  if (scanner) {
+  /*
+    Stop ZXing.
+  */
 
-    try {
+  try {
 
-      await scanner.stop();
+    if (
+      scannerControls
+    ) {
 
-    } catch (e) {}
+      scannerControls.stop();
+
+    }
+
+  }
+
+  catch (e) {}
 
 
-    try {
-
-      scanner.clear();
-
-    } catch (e) {}
+  scannerControls =
+    null;
 
 
-    scanner = null;
+  /*
+    Stop stored camera stream.
+  */
+
+  try {
+
+    if (
+      scannerStream
+    ) {
+
+      scannerStream
+        .getTracks()
+        .forEach(track => {
+
+          track.stop();
+
+        });
+
+    }
+
+  }
+
+  catch (e) {}
+
+
+  scannerStream =
+    null;
+
+
+  /*
+    Stop video element stream.
+  */
+
+  try {
+
+    const video =
+      $("barcodeVideo");
+
+
+    if (
+      video &&
+      video.srcObject
+    ) {
+
+      video.srcObject
+        .getTracks()
+        .forEach(track => {
+
+          track.stop();
+
+        });
+
+
+      video.srcObject =
+        null;
+
+    }
+
+  }
+
+  catch (e) {}
+
+
+  scanning =
+    false;
+
+
+  /*
+    Remove camera preview.
+  */
+
+  const reader =
+    $("reader");
+
+
+  if (reader) {
+
+    reader.innerHTML =
+      "";
 
   }
 
 
-  $("reader").innerHTML = "";
-
+  /*
+    Close modal.
+  */
 
   $("scannerModal")
-    .classList.remove("show");
+    .classList
+    .remove("show");
 
 }
 
@@ -613,26 +1179,37 @@ async function closeScanner() {
 
 document
   .querySelectorAll("input")
-  .forEach(i =>
+  .forEach(input => {
 
-    i.addEventListener(
+    input.addEventListener(
       "keydown",
-      e => {
+      event => {
 
-        if (e.key === "Enter") {
+        /*
+          Hardware Zebra / Android
+          scanners often send ENTER
+          after scanning.
 
-          e.preventDefault();
+          We prevent normal form
+          submission.
+        */
+
+        if (
+          event.key === "Enter"
+        ) {
+
+          event.preventDefault();
 
         }
 
       }
-    )
+    );
 
-  );
+  });
 
 
 /* =========================
-   START APP
+   INITIAL LOAD
 ========================= */
 
 refreshStats();
@@ -644,11 +1221,22 @@ loadLocations();
    SERVICE WORKER
 ========================= */
 
-if ("serviceWorker" in navigator) {
+if (
+  "serviceWorker" in navigator
+) {
 
   navigator
     .serviceWorker
-    .register("/static/sw.js")
-    .catch(() => {});
+    .register(
+      "/static/sw.js"
+    )
+    .catch(error => {
+
+      console.log(
+        "Service worker:",
+        error
+      );
+
+    });
 
 }
