@@ -1109,6 +1109,10 @@ function renderInventoryResults(
         return;
     }
 
+    result.style.display = "block";
+
+    if (!pallets.length) {
+
     if (!pallets.length) {
 
         result.innerHTML = `
