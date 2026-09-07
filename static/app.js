@@ -308,30 +308,6 @@ async function closeScanner() {
     }
 }
 
-    if (scannerControls) {
-
-        try {
-            scannerControls.stop();
-        } catch (e) {}
-
-        scannerControls = null;
-    }
-
-    scanner = null;
-
-    const reader = $("reader");
-
-    if (reader) {
-        reader.innerHTML = "";
-    }
-
-    const modal = $("scannerModal");
-
-    if (modal) {
-        modal.classList.remove("show");
-    }
-}
-
 
 function handleScan(text) {
 
