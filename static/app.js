@@ -203,60 +203,27 @@ async function openScanner(target) {
         return;
     }
 
-    scanner = new Html5Qrcode(
-        "reader",
+   scanner = new Html5Qrcode("reader");
+
+try {
+
+    await scanner.start(
+        { facingMode: "environment" },
         {
-            verbose: false
-        }
+            fps: 10,
+            qrbox: {
+                width: 250,
+                height: 250
+            }
+        },
+        decodedText => {
+            if (!decodedText) return;
+            handleScan(decodedText);
+        },
+        () => {}
     );
 
-    try {
-
-        await scanner.start(
-
-            {
-                facingMode: "environment"
-            },
-
-            {
-                fps: 15,
-
-                qrbox: function(
-                    viewfinderWidth,
-                    viewfinderHeight
-                ) {
-
-                    const size = Math.floor(
-                        Math.min(
-                            viewfinderWidth,
-                            viewfinderHeight
-                        ) * 0.72
-                    );
-
-                    return {
-                        width: size,
-                        height: size
-                    };
-                }
-            },
-
-            function(decodedText) {
-
-                if (!decodedText) {
-                    return;
-                }
-
-                handleScan(decodedText);
-            },
-
-            function(errorMessage) {
-
-                // This is normal while the camera
-                // is searching for a QR/barcode.
-            }
-        );
-
-    } catch (error) {
+} catch (error) {
 
         console.error(
             "Scanner startup error:",
