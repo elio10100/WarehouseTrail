@@ -1,376 +1,654 @@
-let scanTarget=null, scanner=null;
+let scanTarget = null;
+let scanner = null;
 
 const $ = id => document.getElementById(id);
 
-function toast(msg){
-  const t=$("toast");
-  t.textContent=msg;
-  t.style.display="block";
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
   clearTimeout(window.tt);
-  window.tt=setTimeout(()=>t.style.display="none",2800);
+  window.tt = setTimeout(() => t.style.display = "none", 2800);
 }
 
-async function api(url,method="GET",body=null){
-  const r=await fetch(url,{
+async function api(url, method = "GET", body = null) {
+  const r = await fetch(url, {
     method,
-    headers:body?{"Content-Type":"application/json"}:{},
-    body:body?JSON.stringify(body):null
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : null
   });
+
   return await r.json();
 }
 
-function clearFields(...ids){
-  ids.forEach(id=>$(id).value="");
+function clearFields(...ids) {
+  ids.forEach(id => $(id).value = "");
 }
 
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
+
+/* =========================
+   TABS
+========================= */
+
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+
+  document.querySelectorAll(".tab").forEach(x =>
+    x.classList.remove("active")
+  );
+
+  document.querySelectorAll(".page").forEach(x =>
+    x.classList.remove("active")
+  );
+
   b.classList.add("active");
+
   $(b.dataset.page).classList.add("active");
+
 });
 
-async function putIn(){
-  const r=await api("/api/in","POST",{
-    pallet_id:$("inPallet").value,
-    location:$("inLocation").value
+
+/* =========================
+   PALLET IN
+========================= */
+
+async function putIn() {
+
+  const r = await api("/api/in", "POST", {
+    pallet_id: $("inPallet").value,
+    location: $("inLocation").value
   });
 
-  toast(r.ok?"✓ "+r.message:"⚠ "+r.error);
+  toast(
+    r.ok
+      ? "✓ " + r.message
+      : "⚠ " + r.error
+  );
 
-  if(r.ok){
-    clearFields("inPallet","inLocation");
+  if (r.ok) {
+
+    clearFields(
+      "inPallet",
+      "inLocation"
+    );
+
     $("inPallet").focus();
+
     refreshStats();
+
     loadLocations();
+
   }
 }
 
-async function movePallet(){
-  const r=await api("/api/move","POST",{
-    pallet_id:$("movePallet").value,
-    location:$("moveLocation").value
+
+/* =========================
+   MOVE PALLET
+========================= */
+
+async function movePallet() {
+
+  const r = await api("/api/move", "POST", {
+    pallet_id: $("movePallet").value,
+    location: $("moveLocation").value
   });
 
-  toast(r.ok?"✓ "+r.message:"⚠ "+r.error);
+  toast(
+    r.ok
+      ? "✓ " + r.message
+      : "⚠ " + r.error
+  );
 
-  if(r.ok){
-    clearFields("movePallet","moveLocation");
+  if (r.ok) {
+
+    clearFields(
+      "movePallet",
+      "moveLocation"
+    );
+
     $("movePallet").focus();
+
     refreshStats();
+
     loadLocations();
+
   }
 }
 
-async function takeOut(){
-  const r=await api("/api/out","POST",{
-    pallet_id:$("outPallet").value
+
+/* =========================
+   PALLET OUT
+========================= */
+
+async function takeOut() {
+
+  const r = await api("/api/out", "POST", {
+    pallet_id: $("outPallet").value
   });
 
-  toast(r.ok?"✓ "+r.message:"⚠ "+r.error);
+  toast(
+    r.ok
+      ? "✓ " + r.message
+      : "⚠ " + r.error
+  );
 
-  if(r.ok){
+  if (r.ok) {
+
     clearFields("outPallet");
+
     $("outPallet").focus();
+
     refreshStats();
+
     loadLocations();
+
   }
 }
 
-async function findPallet(){
-  const id=encodeURIComponent(
+
+/* =========================
+   FIND PALLET
+========================= */
+
+async function findPallet() {
+
+  const id = encodeURIComponent(
     $("findPallet").value.trim()
   );
 
-  if(!id)return;
+  if (!id) return;
 
-  const r=await api("/api/find/"+id);
-  const el=$("findResult");
+  const r = await api(
+    "/api/find/" + id
+  );
 
-  if(!r.ok){
-    el.innerHTML=`<div class="error">${r.error}</div>`;
+  const el = $("findResult");
+
+  if (!r.ok) {
+
+    el.innerHTML =
+      `<div class="error">
+        ${r.error}
+      </div>`;
+
     return;
+
   }
 
-  const p=r.pallet;
+  const p = r.pallet;
 
-  const hist=r.history.map(x=>
+  const hist = r.history.map(x =>
+
     `<tr>
       <td>${x.action}</td>
-      <td>${x.old_location||"—"}</td>
-      <td>${x.new_location||"—"}</td>
+      <td>${x.old_location || "—"}</td>
+      <td>${x.new_location || "—"}</td>
       <td>${x.timestamp}</td>
     </tr>`
+
   ).join("");
 
-  el.innerHTML=`
-    <div class="ok detail">
-      <strong>📦 ${p.pallet_id}</strong><br>
-      Status: <b>${p.status}</b><br>
-      📍 Location: <b>${p.location||"OUT"}</b><br>
-      Product: ${p.product||"—"}<br>
-      Lot: ${p.lot||"—"} &nbsp;
-      Qty: ${p.qty||"—"} &nbsp;
-      Brand: ${p.brand||"—"}
+  el.innerHTML =
+
+    `<div class="ok detail">
+
+      <strong>
+        📦 ${p.pallet_id}
+      </strong>
+
+      <br>
+
+      Status:
+      <b>${p.status}</b>
+
+      <br>
+
+      📍 Location:
+      <b>${p.location || "OUT"}</b>
+
+      <br>
+
+      Product:
+      ${p.product || "—"}
+
+      <br>
+
+      Lot:
+      ${p.lot || "—"}
+
+      &nbsp;
+
+      Qty:
+      ${p.qty || "—"}
+
+      &nbsp;
+
+      Brand:
+      ${p.brand || "—"}
 
       <table>
+
         <tr>
           <th>Action</th>
           <th>From</th>
           <th>To</th>
           <th>Time</th>
         </tr>
+
         ${hist}
+
       </table>
+
     </div>`;
+
 }
 
-async function findLocation(){
-  const loc=encodeURIComponent(
-    $("locationSearch").value.trim().toUpperCase()
+
+/* =========================
+   FIND LOCATION
+========================= */
+
+async function findLocation() {
+
+  const loc = encodeURIComponent(
+    $("locationSearch")
+      .value
+      .trim()
+      .toUpperCase()
   );
 
-  if(!loc)return;
+  if (!loc) return;
 
-  const r=await api("/api/location/"+loc);
-  const el=$("locationResult");
+  const r = await api(
+    "/api/location/" + loc
+  );
 
-  if(!r.ok){
-    el.innerHTML=`<div class="error">${r.error}</div>`;
+  const el =
+    $("locationResult");
+
+  if (!r.ok) {
+
+    el.innerHTML =
+      `<div class="error">
+        ${r.error}
+      </div>`;
+
     return;
+
   }
 
-  const x=r.location;
-  const p=r.pallet;
+  const x = r.location;
 
-  el.innerHTML=p
+  const p = r.pallet;
+
+  el.innerHTML = p
+
     ? `<div class="ok detail">
-        <strong>${x.location_id}</strong><br>
-        Room ${x.room} • Rack ${x.rack} • Level ${x.level} • Position ${x.position}
+
+        <strong>
+          ${x.location_id}
+        </strong>
+
+        <br>
+
+        Room ${x.room}
+        • Rack ${x.rack}
+        • Level ${x.level}
+        • Position ${x.position}
+
         <hr>
-        📦 Pallet: <b>${p.pallet_id}</b><br>
-        ${p.product||""}
-        ${p.lot?"• Lot "+p.lot:""}
+
+        📦 Pallet:
+        <b>${p.pallet_id}</b>
+
+        <br>
+
+        ${p.product || ""}
+
+        ${p.lot
+          ? "• Lot " + p.lot
+          : ""
+        }
+
       </div>`
+
     : `<div class="ok detail">
-        <strong>${x.location_id}</strong><br>
-        Room ${x.room} • Rack ${x.rack} • Level ${x.level} • Position ${x.position}
+
+        <strong>
+          ${x.location_id}
+        </strong>
+
+        <br>
+
+        Room ${x.room}
+        • Rack ${x.rack}
+        • Level ${x.level}
+        • Position ${x.position}
+
         <hr>
+
         ✅ <b>EMPTY</b>
+
       </div>`;
+
 }
 
-async function loadLocations(){
-  const rows=await api("/api/locations");
 
-  $("locationGrid").innerHTML=
-    `<div class="locgrid">`+
-    rows.map(x=>
-      `<div class="loc ${x.pallet_id?"occupied":""}">
-        <b>${x.location_id}</b><br>
-        ${x.pallet_id?"📦 "+x.pallet_id:"✅ Empty"}
+/* =========================
+   LOAD LOCATIONS
+========================= */
+
+async function loadLocations() {
+
+  const rows =
+    await api("/api/locations");
+
+  $("locationGrid").innerHTML =
+
+    `<div class="locgrid">`
+
+    +
+
+    rows.map(x =>
+
+      `<div class="loc ${x.pallet_id ? "occupied" : ""}">
+
+        <b>
+          ${x.location_id}
+        </b>
+
+        <br>
+
+        ${
+          x.pallet_id
+            ? "📦 " + x.pallet_id
+            : "✅ Empty"
+        }
+
       </div>`
-    ).join("")+
+
+    ).join("")
+
+    +
+
     `</div>`;
+
 }
 
-async function refreshStats(){
-  const s=await api("/api/stats");
 
-  $("occupied").textContent=s.occupied;
-  $("available").textContent=s.available;
-  $("total").textContent=s.total_locations;
+/* =========================
+   STATS
+========================= */
+
+async function refreshStats() {
+
+  const s =
+    await api("/api/stats");
+
+  $("occupied").textContent =
+    s.occupied;
+
+  $("available").textContent =
+    s.available;
+
+  $("total").textContent =
+    s.total_locations;
+
 }
 
 
 /* =========================================
-   IMPROVED PHONE BARCODE SCANNER
-   ========================================= */
+   PHONE CAMERA BARCODE SCANNER
+========================================= */
 
-async function openScanner(target){
+async function openScanner(target) {
 
-  scanTarget=target;
+  scanTarget = target;
 
-  $("scannerModal").classList.add("show");
+  $("scannerModal")
+    .classList.add("show");
 
-  if(scanner) return;
+  if (scanner) return;
 
-  scanner=new Html5Qrcode("reader",{
+  scanner =
+    new Html5Qrcode("reader");
 
-    formatsToSupport:[
+  try {
 
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.CODE_93,
+    /*
+      Ask browser for available cameras.
+      This also lets us see the REAL error
+      instead of assuming it is permissions.
+    */
 
-      Html5QrcodeSupportedFormats.CODABAR,
+    const cameras =
+      await Html5Qrcode.getCameras();
 
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
+    if (
+      !cameras ||
+      cameras.length === 0
+    ) {
 
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
+      throw new Error(
+        "No camera was detected on this device."
+      );
 
-      Html5QrcodeSupportedFormats.ITF,
+    }
 
-      Html5QrcodeSupportedFormats.QR_CODE
 
-    ],
+    /*
+      Try to find rear camera.
+    */
 
-    verbose:false
+    let camera =
+      cameras.find(c =>
 
-  });
+        /back|rear|environment/i
+          .test(c.label)
 
-  try{
+      );
+
+
+    /*
+      If browser doesn't label cameras,
+      use the last camera in the list.
+      This is commonly the rear camera.
+    */
+
+    if (!camera) {
+
+      camera =
+        cameras[cameras.length - 1];
+
+    }
+
+
+    /*
+      Start barcode scanner.
+    */
 
     await scanner.start(
 
-      {
-        facingMode:{
-          ideal:"environment"
-        }
-      },
+      camera.id,
 
       {
 
-        fps:20,
-
-        /*
-        Wide rectangular scan area.
-        Better for warehouse pallet barcodes.
-        */
-
-        qrbox:(viewfinderWidth,viewfinderHeight)=>{
-
-          const width=
-            Math.floor(viewfinderWidth*0.92);
-
-          const height=
-            Math.min(
-              180,
-              Math.floor(viewfinderHeight*0.38)
-            );
-
-          return{
-            width:width,
-            height:height
-          };
-
-        },
-
-        aspectRatio:1.777778,
-
-        disableFlip:true
+        fps: 15
 
       },
 
-      text=>{
 
-        if(!scanTarget)return;
+      /* SUCCESS */
 
-        const scannedValue=
+      text => {
+
+        if (!scanTarget) return;
+
+        const scannedValue =
           String(text).trim();
 
-        $(scanTarget).value=
+        $(scanTarget).value =
           scannedValue;
 
+
         /*
-        Vibrate phone when barcode
-        is successfully captured.
+          Vibrate phone when scan succeeds.
         */
 
-        if(navigator.vibrate){
+        if (navigator.vibrate) {
+
           navigator.vibrate(80);
+
         }
+
 
         closeScanner();
 
+
         toast(
-          "✓ Scan captured: "+
+          "✓ Scan captured: " +
           scannedValue
         );
+
 
         $(scanTarget).focus();
 
       },
 
-      errorMessage=>{
+
+      /* FAILED FRAME */
+
+      errorMessage => {
+
         /*
-        Ignore individual failed frames.
-        Camera continues looking for barcode.
+          This is NORMAL.
+
+          The camera continuously tries
+          frames until it finds a barcode.
+
+          We intentionally do nothing here.
         */
+
       }
 
     );
 
-  }catch(e){
+
+  } catch (e) {
 
     console.error(
-      "Scanner error:",
+      "CAMERA ERROR:",
       e
     );
 
-    $("reader").innerHTML=
-      "<div class='error'>Camera could not start. Check camera permission and try again.</div>";
+
+    /*
+      IMPORTANT:
+
+      Show the REAL error from the phone
+      instead of always saying permissions.
+    */
+
+    let message =
+      e && e.message
+        ? e.message
+        : String(e);
+
+
+    $("reader").innerHTML =
+
+      `<div class="error">
+
+        <b>Camera error:</b>
+
+        <br><br>
+
+        ${message}
+
+      </div>`;
 
   }
+
 }
 
 
-async function closeScanner(){
+/* =========================
+   CLOSE CAMERA
+========================= */
 
-  if(scanner){
+async function closeScanner() {
 
-    try{
+  if (scanner) {
+
+    try {
+
       await scanner.stop();
-    }catch(e){}
 
-    try{
+    } catch (e) {}
+
+
+    try {
+
       scanner.clear();
-    }catch(e){}
 
-    scanner=null;
+    } catch (e) {}
+
+
+    scanner = null;
 
   }
 
-  $("reader").innerHTML="";
+
+  $("reader").innerHTML = "";
+
 
   $("scannerModal")
     .classList.remove("show");
+
 }
 
 
-/*
-Prevent scanner/keyboard Enter key
-from accidentally submitting forms.
-*/
+/* =========================
+   INPUT BEHAVIOR
+========================= */
 
 document
   .querySelectorAll("input")
-  .forEach(i=>
+  .forEach(i =>
+
     i.addEventListener(
       "keydown",
-      e=>{
+      e => {
 
-        if(e.key==="Enter"){
+        if (e.key === "Enter") {
+
           e.preventDefault();
+
         }
 
       }
     )
+
   );
 
+
+/* =========================
+   START APP
+========================= */
 
 refreshStats();
 
 loadLocations();
 
 
-if("serviceWorker" in navigator){
+/* =========================
+   SERVICE WORKER
+========================= */
+
+if ("serviceWorker" in navigator) {
 
   navigator
     .serviceWorker
     .register("/static/sw.js")
-    .catch(()=>{});
+    .catch(() => {});
 
 }
