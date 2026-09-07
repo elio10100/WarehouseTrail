@@ -176,6 +176,7 @@ async function openScanner(target) {
     modal.classList.add("show");
     reader.innerHTML = "";
 
+    // Stop any old scanner before starting a new one
     if (scanner) {
 
         try {
@@ -191,6 +192,7 @@ async function openScanner(target) {
 
     scannerControls = null;
 
+    // Make sure html5-qrcode loaded
     if (typeof Html5Qrcode === "undefined") {
 
         reader.innerHTML =
@@ -201,7 +203,12 @@ async function openScanner(target) {
         return;
     }
 
-    scanner = new Html5Qrcode("reader");
+    scanner = new Html5Qrcode(
+        "reader",
+        {
+            verbose: false
+        }
+    );
 
     try {
 
@@ -212,10 +219,24 @@ async function openScanner(target) {
             },
 
             {
-                fps: 10,
-                qrbox: {
-                    width: 250,
-                    height: 250
+                fps: 15,
+
+                qrbox: function(
+                    viewfinderWidth,
+                    viewfinderHeight
+                ) {
+
+                    const size = Math.floor(
+                        Math.min(
+                            viewfinderWidth,
+                            viewfinderHeight
+                        ) * 0.72
+                    );
+
+                    return {
+                        width: size,
+                        height: size
+                    };
                 }
             },
 
@@ -228,8 +249,10 @@ async function openScanner(target) {
                 handleScan(decodedText);
             },
 
-            function() {
-                // Normal while searching for QR/barcode.
+            function(errorMessage) {
+
+                // This is normal while the camera
+                // is searching for a QR/barcode.
             }
         );
 
@@ -286,6 +309,7 @@ async function closeScanner() {
 }
 
 
+
 function handleScan(text) {
 
     text = String(text || "").trim();
@@ -301,11 +325,24 @@ function handleScan(text) {
         return;
     }
 
+    /*
+        For pallet fields we keep the ENTIRE QR string.
+
+        The server will extract:
+        Pallet ID
+        Lot
+        Description
+        Packing
+        Weight
+        Qty
+        Brand
+    */
+
     const palletFields = [
         "inPallet",
         "movePallet",
         "outPallet",
-        "searchPallet"
+        "findPallet"
     ];
 
     if (palletFields.includes(scanTarget)) {
@@ -337,6 +374,10 @@ function handleScan(text) {
 
     toast("✓ Scan captured");
 
+    /*
+        Automatically move to the next logical step.
+    */
+
     if (currentTarget === "inPallet") {
 
         setTimeout(() => {
@@ -365,10 +406,10 @@ function handleScan(text) {
         }, 250);
     }
 
-    if (currentTarget === "searchPallet") {
+    if (currentTarget === "findPallet") {
 
         setTimeout(() => {
-            searchInventory();
+            findPallet();
         }, 250);
     }
 }
@@ -397,8 +438,8 @@ function showScannedPalletInfo(
         containerId = "outScanInfo";
     }
 
-    if (targetId === "searchPallet") {
-        containerId = "searchScanInfo";
+    if (targetId === "findPallet") {
+        containerId = "findScanInfo";
     }
 
     if (!containerId) {
@@ -407,6 +448,11 @@ function showScannedPalletInfo(
 
     let container =
         $(containerId);
+
+    /*
+        If the HTML does not already contain the information
+        box, create it automatically.
+    */
 
     if (!container) {
 
@@ -681,6 +727,197 @@ async function takeOut() {
 
 
 // ============================================================
+// FIND PALLET
+// ============================================================
+
+async function findPallet() {
+
+    const raw =
+        $("findPallet")
+            .value
+            .trim();
+
+    if (!raw) {
+
+        toast("Scan or enter pallet ID.");
+        return;
+    }
+
+    const parsed =
+        parsePalletQR(raw);
+
+    const palletId =
+        parsed.pallet_id;
+
+    const result =
+        $("findResult");
+
+    result.innerHTML =
+        "<div class='loading'>Searching...</div>";
+
+    try {
+
+        const data =
+            await api(
+                "/api/find/" +
+                encodeURIComponent(
+                    palletId
+                )
+            );
+
+        const pallet =
+            data.pallet;
+
+        let statusHtml;
+
+        if (pallet.status === "IN") {
+
+            statusHtml = `
+                <div class="status-in">
+                    IN WAREHOUSE
+                </div>
+            `;
+
+        } else {
+
+            statusHtml = `
+                <div class="status-out">
+                    OUT
+                </div>
+            `;
+        }
+
+        let historyHtml = "";
+
+        if (
+            data.history &&
+            data.history.length
+        ) {
+
+            historyHtml =
+                "<h3>History</h3>";
+
+            historyHtml +=
+                "<div class='history-list'>";
+
+            data.history.forEach(
+                item => {
+
+                    historyHtml += `
+                        <div class="history-item">
+
+                            <b>
+                                ${escapeHtml(item.action)}
+                            </b>
+
+                            <span>
+                                ${escapeHtml(item.old_location || "")}
+                                ${item.new_location ? " → " + escapeHtml(item.new_location) : ""}
+                            </span>
+
+                            <small>
+                                ${escapeHtml(item.timestamp || "")}
+                            </small>
+
+                        </div>
+                    `;
+                }
+            );
+
+            historyHtml +=
+                "</div>";
+        }
+
+        result.innerHTML = `
+
+            <div class="pallet-result">
+
+                ${statusHtml}
+
+                <div class="result-location">
+                    ${escapeHtml(
+                        pallet.location ||
+                        "No current location"
+                    )}
+                </div>
+
+                <div class="result-grid">
+
+                    <div>
+                        <span>Pallet ID</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.pallet_id
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Lot</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.lot || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Description</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.product || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Packing</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.packing || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Weight</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.weight || "-"
+                            )}
+                        </b>
+                    </div>                             )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Status</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.status
+                            )}
+                        </b>
+                    </div>
+
+                </div>
+
+                ${historyHtml}
+
+            </div>
+        `;
+
+    } catch (error) {
+
+        result.innerHTML = `
+            <div class="error">
+                ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+
+// ============================================================
 // LOCATION SEARCH
 // ============================================================
 
@@ -848,24 +1085,8 @@ async function searchInventory() {
                     return;
                 }
 
-                let value =
+                const value =
                     element.value.trim();
-
-                if (
-                    elementId === "searchPallet" &&
-                    value
-                ) {
-                    value =
-                        parsePalletQR(value)
-                            .pallet_id;
-                }
-
-                if (
-                    elementId === "searchStatus" &&
-                    value === "ALL"
-                ) {
-                    return;
-                }
 
                 if (value) {
 
@@ -883,8 +1104,6 @@ async function searchInventory() {
     if (!result) {
         return;
     }
-
-    result.style.display = "block";
 
     result.innerHTML =
         "<div class='loading'>Searching inventory...</div>";
@@ -922,8 +1141,6 @@ function renderInventoryResults(
     if (!result) {
         return;
     }
-
-    result.style.display = "block";
 
     if (!pallets.length) {
 
@@ -1058,6 +1275,8 @@ function clearInventorySearch() {
 
     searchInventory();
 }
+
+
 // ============================================================
 // STATS
 // ============================================================
@@ -1270,10 +1489,7 @@ function openLocationFromGrid(
         top: 0,
         behavior: "smooth"
     });
-}
-
-
-// ============================================================
+}// ============================================================
 // TABS
 // ============================================================
 
@@ -1292,7 +1508,6 @@ function initializeTabs() {
                             .querySelectorAll(".tab")
                             .forEach(
                                 tab => {
-
                                     tab.classList.remove(
                                         "active"
                                     );
@@ -1303,7 +1518,6 @@ function initializeTabs() {
                             .querySelectorAll(".page")
                             .forEach(
                                 page => {
-
                                     page.classList.remove(
                                         "active"
                                     );
@@ -1337,7 +1551,7 @@ function initializeTabs() {
 
                         if (
                             pageId ===
-                            "find"
+                            "inventory"
                         ) {
 
                             searchInventory();
@@ -1440,6 +1654,17 @@ document.addEventListener(
         }
 
         if (
+            id === "findPallet"
+        ) {
+
+            event.preventDefault();
+
+            findPallet();
+
+            return;
+        }
+
+        if (
             id === "locationSearch"
         ) {
 
@@ -1501,7 +1726,7 @@ document.addEventListener(
         await loadLocations();
 
         /*
-            If the inventory search exists,
+            If the inventory page exists,
             load current inventory.
         */
 
