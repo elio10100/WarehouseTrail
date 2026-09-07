@@ -166,13 +166,134 @@ async function openScanner(target) {
     scanTarget = target;
 
     const modal = $("scannerModal");
+    const reader = $("reader");
 
-    if (!modal) {
+    if (!modal || !reader) {
         alert("Scanner window not found.");
         return;
     }
 
     modal.classList.add("show");
+    reader.innerHTML = "";
+
+    // Stop any old scanner before starting a new one
+    if (scanner) {
+
+        try {
+            await scanner.stop();
+        } catch (e) {}
+
+        try {
+            scanner.clear();
+        } catch (e) {}
+
+        scanner = null;
+    }
+
+    scannerControls = null;
+
+    // Make sure html5-qrcode loaded
+    if (typeof Html5Qrcode === "undefined") {
+
+        reader.innerHTML =
+            "<div class='error'>" +
+            "Scanner library did not load. Refresh the page and try again." +
+            "</div>";
+
+        return;
+    }
+
+    scanner = new Html5Qrcode(
+        "reader",
+        {
+            verbose: false
+        }
+    );
+
+    try {
+
+        await scanner.start(
+
+            {
+                facingMode: "environment"
+            },
+
+            {
+                fps: 15,
+
+                qrbox: function(
+                    viewfinderWidth,
+                    viewfinderHeight
+                ) {
+
+                    const size = Math.floor(
+                        Math.min(
+                            viewfinderWidth,
+                            viewfinderHeight
+                        ) * 0.72
+                    );
+
+                    return {
+                        width: size,
+                        height: size
+                    };
+                }
+            },
+
+            function(decodedText) {
+
+                if (!decodedText) {
+                    return;
+                }
+
+                handleScan(decodedText);
+            },
+
+            function(errorMessage) {
+
+                // This is normal while the camera
+                // is searching for a QR/barcode.
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Scanner startup error:",
+            error
+        );
+
+        scanner = null;
+
+        reader.innerHTML =
+            "<div class='error'>" +
+            "Camera could not start: " +
+            escapeHtml(
+                error && error.message
+                    ? error.message
+                    : String(error)
+            ) +
+            "</div>";
+    }
+}
+
+
+async function closeScanner() {
+
+    if (scanner) {
+
+        try {
+            await scanner.stop();
+        } catch (e) {}
+
+        try {
+            scanner.clear();
+        } catch (e) {}
+
+        scanner = null;
+    }
+
+    scannerControls = null;
 
     const reader = $("reader");
 
@@ -180,117 +301,12 @@ async function openScanner(target) {
         reader.innerHTML = "";
     }
 
-    if (scannerControls) {
+    const modal = $("scannerModal");
 
-        try {
-            scannerControls.stop();
-        } catch (e) {}
-
-        scannerControls = null;
-    }
-
-    /*
-        We use ZXing here because it performs much better
-        on the pallet QR/barcode labels being used in the
-        warehouse.
-    */
-
-    if (
-        typeof ZXingBrowser === "undefined" ||
-        !ZXingBrowser.BrowserMultiFormatReader
-    ) {
-
-        if (reader) {
-            reader.innerHTML =
-                "<div class='error'>" +
-                "Scanner library did not load. Refresh the page and try again." +
-                "</div>";
-        }
-
-        return;
-    }
-
-    try {
-
-        const codeReader =
-            new ZXingBrowser.BrowserMultiFormatReader();
-
-        scanner = codeReader;
-
-        const devices =
-            await ZXingBrowser.BrowserCodeReader
-                .listVideoInputDevices();
-
-        let selectedDeviceId = undefined;
-
-        if (devices && devices.length) {
-
-            const backCamera =
-                devices.find(device => {
-
-                    const label =
-                        String(device.label || "")
-                            .toLowerCase();
-
-                    return (
-                        label.includes("back") ||
-                        label.includes("rear") ||
-                        label.includes("environment")
-                    );
-                });
-
-            if (backCamera) {
-
-                selectedDeviceId =
-                    backCamera.deviceId;
-
-            } else {
-
-                selectedDeviceId =
-                    devices[devices.length - 1]
-                        .deviceId;
-            }
-        }
-
-        scannerControls =
-            await codeReader.decodeFromVideoDevice(
-                selectedDeviceId,
-                "reader",
-
-                (result, error, controls) => {
-
-                    if (!result) return;
-
-                    const text =
-                        result.getText
-                            ? result.getText()
-                            : String(result.text || "");
-
-                    if (!text) return;
-
-                    handleScan(text);
-                }
-            );
-
-    } catch (error) {
-
-        console.error(
-            "Camera scanner error:",
-            error
-        );
-
-        if (reader) {
-
-            reader.innerHTML =
-                "<div class='error'>" +
-                "Camera could not start. Make sure Safari/browser camera permission is enabled, then refresh the page." +
-                "</div>";
-        }
+    if (modal) {
+        modal.classList.remove("show");
     }
 }
-
-
-async function closeScanner() {
 
     if (scannerControls) {
 
