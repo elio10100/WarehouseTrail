@@ -1,1548 +1,1790 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import sqlite3
-import csv
-import io
-import re
-import os
-from datetime import datetime
+const $ = (id) => document.getElementById(id);
 
-app = Flask(__name__)
-
-app.secret_key = os.environ.get(
-    "SECRET_KEY",
-    "change-this-secret-key"
-)
-
-DB = os.environ.get(
-    "DATABASE_PATH",
-    "warehouse.db"
-)
+let scanner = null;
+let scanTarget = null;
+let scannerControls = null;
 
 
-# ============================================================
-# WAREHOUSE CONFIGURATION
-# ============================================================
+// ============================================================
+// GENERAL HELPERS
+// ============================================================
 
-# 3 Rooms
-# 10 Racks per Room
-# 3 Levels per Rack
-# 4 Positions per Level
-#
-# TOTAL = 360 locations
+function toast(message) {
 
-ROOMS = 3
-RACKS_PER_ROOM = 10
-LEVELS = 3
-POSITIONS = 4
+    const el = $("toast");
 
+    if (!el) return;
 
-# ============================================================
-# DATABASE
-# ============================================================
+    el.textContent = message;
+    el.classList.add("show");
 
-def db():
-    con = sqlite3.connect(DB, timeout=20)
-    con.row_factory = sqlite3.Row
-    return con
+    setTimeout(() => {
+        el.classList.remove("show");
+    }, 2500);
+}
 
 
-def now():
-    return datetime.now().isoformat(timespec="seconds")
+function escapeHtml(value) {
+
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
 
 
-def column_exists(con, table, column):
-    rows = con.execute(
-        f"PRAGMA table_info({table})"
-    ).fetchall()
+async function api(url, options = {}) {
 
-    return any(
-        row["name"] == column
-        for row in rows
-    )
+    const response = await fetch(url, options);
 
+    let data;
 
-def add_column_if_missing(
-    con,
-    table,
-    column,
-    definition
-):
-    if not column_exists(
-        con,
-        table,
-        column
-    ):
-        con.execute(
-            f"""
-            ALTER TABLE {table}
-            ADD COLUMN {column} {definition}
-            """
-        )
-
-
-def init_db():
-
-    con = db()
-
-    con.executescript("""
-        CREATE TABLE IF NOT EXISTS locations (
-            location_id TEXT PRIMARY KEY,
-            room INTEGER NOT NULL,
-            rack INTEGER NOT NULL,
-            level INTEGER NOT NULL,
-            position INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS pallets (
-            pallet_id TEXT PRIMARY KEY,
-            location TEXT,
-            status TEXT NOT NULL DEFAULT 'IN',
-
-            product TEXT DEFAULT '',
-            lot TEXT DEFAULT '',
-            packing TEXT DEFAULT '',
-            weight TEXT DEFAULT '',
-            qty TEXT DEFAULT '',
-            brand TEXT DEFAULT '',
-
-            raw_qr TEXT DEFAULT '',
-
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pallet_id TEXT NOT NULL,
-            action TEXT NOT NULL,
-            old_location TEXT DEFAULT '',
-            new_location TEXT DEFAULT '',
-            timestamp TEXT NOT NULL
-        );
-    """)
-
-    # --------------------------------------------------------
-    # SAFE DATABASE UPGRADE
-    # --------------------------------------------------------
-    #
-    # If warehouse.db already exists, CREATE TABLE will NOT
-    # add new columns. These checks add them automatically.
-    #
-    # This means you DO NOT need to delete your database.
-    # --------------------------------------------------------
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "product",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "lot",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "packing",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "weight",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "qty",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "brand",
-        "TEXT DEFAULT ''"
-    )
-
-    add_column_if_missing(
-        con,
-        "pallets",
-        "raw_qr",
-        "TEXT DEFAULT ''"
-    )
-
-    # --------------------------------------------------------
-    # CREATE WAREHOUSE LOCATIONS
-    # --------------------------------------------------------
-
-    count = con.execute(
-        """
-        SELECT COUNT(*) AS c
-        FROM locations
-        """
-    ).fetchone()["c"]
-
-    if count == 0:
-
-        for room in range(
-            1,
-            ROOMS + 1
-        ):
-
-            for rack in range(
-                1,
-                RACKS_PER_ROOM + 1
-            ):
-
-                for level in range(
-                    1,
-                    LEVELS + 1
-                ):
-
-                    for position in range(
-                        1,
-                        POSITIONS + 1
-                    ):
-
-                        location_id = (
-                            f"R{room}"
-                            f"R{rack}"
-                            f"L{level}"
-                            f"P{position}"
-                        )
-
-                        con.execute(
-                            """
-                            INSERT INTO locations
-                            (
-                                location_id,
-                                room,
-                                rack,
-                                level,
-                                position
-                            )
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (
-                                location_id,
-                                room,
-                                rack,
-                                level,
-                                position
-                            )
-                        )
-
-    con.commit()
-    con.close()
-
-
-# ============================================================
-# QR / BARCODE PARSING
-# ============================================================
-
-def clean_pallet_id(raw):
-
-    raw = (raw or "").strip()
-
-    # Example:
-    #
-    # ip:04730905|qp:1{p}l:2005,d:CARROT,p:BAG,w:0,qb:
-    #
-    # Result:
-    # 04730905
-
-    match = re.search(
-        r'(?:^|\|)ip:([^|]+)',
-        raw,
-        re.IGNORECASE
-    )
-
-    if match:
-        return match.group(1).strip()
-
-    return raw
-
-
-def parse_pallet(raw):
-
-    raw = (raw or "").strip()
-
-    result = {
-        "pallet_id": clean_pallet_id(raw),
-        "product": "",
-        "lot": "",
-        "packing": "",
-        "weight": "",
-        "qty": "",
-        "brand": "",
-        "raw_qr": raw
+    try {
+        data = await response.json();
+    } catch (e) {
+        data = {
+            ok: false,
+            error: "Server returned an invalid response."
+        };
     }
 
-    # --------------------------------------------------------
-    # EXPECTED QR EXAMPLE
-    # --------------------------------------------------------
-    #
-    # ip:04730905|qp:1{p}l:2005,d:CARROT,p:BAG,w:0,qb:
-    #
-    # ip = Pallet ID
-    # l  = Lot
-    # d  = Description / Product
-    # p  = Packing
-    # w  = Weight
-    # b  = Brand
-    # qb = Quantity
-    # --------------------------------------------------------
+    if (!response.ok) {
+        throw new Error(
+            data.error ||
+            data.message ||
+            "Request failed."
+        );
+    }
 
-    if "ip:" not in raw.lower():
-        return result
-
-    # Everything after the first |
-    if "|" in raw:
-
-        details = raw.split(
-            "|",
-            1
-        )[1]
-
-        # Some QR codes include:
-        #
-        # qp:1{p}l:2005
-        #
-        # We specifically extract l: after {p}
-        # before normal comma parsing.
-
-        lot_match = re.search(
-            r'(?:\{p\}|^|,)l:([^,|]*)',
-            details,
-            re.IGNORECASE
-        )
-
-        if lot_match:
-            result["lot"] = (
-                lot_match
-                .group(1)
-                .strip()
-            )
-
-        parts = details.split(",")
-
-        for part in parts:
-
-            part = part.strip()
-
-            if ":" not in part:
-                continue
-
-            key, value = part.split(
-                ":",
-                1
-            )
-
-            key = key.strip().lower()
-            value = value.strip()
-
-            # The first section can contain:
-            #
-            # qp:1{p}l:2005
-            #
-            # so don't treat the entire thing
-            # as one normal field.
-
-            if key == "d":
-                result["product"] = value
-
-            elif key == "l":
-                result["lot"] = value
-
-            elif key == "p":
-                result["packing"] = value
-
-            elif key == "w":
-                result["weight"] = value
-
-            elif key == "qb":
-                result["qty"] = value
-
-            elif key == "b":
-                result["brand"] = value
-
-    return result
+    return data;
+}
 
 
-# ============================================================
-# LOCATION HELPERS
-# ============================================================
+function clearInput(id) {
 
-def location_exists(
-    con,
-    location
-):
+    const input = $(id);
 
-    row = con.execute(
-        """
-        SELECT 1
-        FROM locations
-        WHERE location_id=?
-        """,
-        (location,)
-    ).fetchone()
-
-    return row is not None
+    if (input) {
+        input.value = "";
+    }
+}
 
 
-# ============================================================
-# MAIN PAGE
-# ============================================================
+// ============================================================
+// QR DATA PARSER
+// ============================================================
 
-@app.route("/")
-def index():
-    return render_template(
-        "index.html"
-    )
+function parsePalletQR(raw) {
+
+    raw = String(raw || "").trim();
+
+    const result = {
+        pallet_id: raw,
+        lot: "",
+        product: "",
+        packing: "",
+        weight: "",
+        qty: "",
+        brand: "",
+        raw_qr: raw
+    };
+
+    /*
+        Example QR:
+
+        ip:04730905|qp:1{p}l:2005,d:CARROT,p:BAG,w:0,qb:
+    */
+
+    const palletMatch =
+        raw.match(/(?:^|\|)ip:([^|]+)/i);
+
+    if (palletMatch) {
+        result.pallet_id =
+            palletMatch[1].trim();
+    }
+
+    const lotMatch =
+        raw.match(/(?:\{p\}|^|,)l:([^,|]*)/i);
+
+    if (lotMatch) {
+        result.lot =
+            lotMatch[1].trim();
+    }
+
+    const descriptionMatch =
+        raw.match(/(?:^|,)d:([^,|]*)/i);
+
+    if (descriptionMatch) {
+        result.product =
+            descriptionMatch[1].trim();
+    }
+
+    const packingMatch =
+        raw.match(/(?:^|,)p:([^,|]*)/i);
+
+    if (packingMatch) {
+        result.packing =
+            packingMatch[1].trim();
+    }
+
+    const weightMatch =
+        raw.match(/(?:^|,)w:([^,|]*)/i);
+
+    if (weightMatch) {
+        result.weight =
+            weightMatch[1].trim();
+    }
+
+    const qtyMatch =
+        raw.match(/(?:^|,)qb:([^,|]*)/i);
+
+    if (qtyMatch) {
+        result.qty =
+            qtyMatch[1].trim();
+    }
+
+    const brandMatch =
+        raw.match(/(?:^|,)b:([^,|]*)/i);
+
+    if (brandMatch) {
+        result.brand =
+            brandMatch[1].trim();
+    }
+
+    return result;
+}
 
 
-# ============================================================
-# STATS
-# ============================================================
+// ============================================================
+// SCANNER
+// ============================================================
 
-@app.get("/api/stats")
-def stats():
+async function openScanner(target) {
 
-    con = db()
+    scanTarget = target;
 
-    total = con.execute(
-        """
-        SELECT COUNT(*) AS c
-        FROM locations
-        """
-    ).fetchone()["c"]
+    const modal = $("scannerModal");
 
-    occupied = con.execute(
-        """
-        SELECT COUNT(*) AS c
-        FROM pallets
-        WHERE status='IN'
-        """
-    ).fetchone()["c"]
+    if (!modal) {
+        alert("Scanner window not found.");
+        return;
+    }
 
-    con.close()
+    modal.classList.add("show");
 
-    return jsonify(
-        total_locations=total,
-        occupied=occupied,
-        available=total - occupied
-    )
+    const reader = $("reader");
 
+    if (reader) {
+        reader.innerHTML = "";
+    }
 
-# ============================================================
-# PUT PALLET IN
-# ============================================================
+    if (scannerControls) {
 
-@app.post("/api/in")
-def put_in():
+        try {
+            scannerControls.stop();
+        } catch (e) {}
 
-    body = request.get_json(
-        force=True
-    )
+        scannerControls = null;
+    }
 
-    raw_pallet = body.get(
-        "pallet_id",
-        ""
-    )
-
-    parsed = parse_pallet(
-        raw_pallet
-    )
-
-    pallet_id = parsed[
-        "pallet_id"
-    ]
-
-    location = (
-        body.get(
-            "location"
-        )
-        or ""
-    ).strip().upper()
-
-    if not pallet_id or not location:
-
-        return jsonify(
-            ok=False,
-            error=(
-                "Scan a pallet "
-                "and a rack location."
-            )
-        ), 400
-
-    con = db()
-
-    # --------------------------------------------------------
-    # VALID LOCATION?
-    # --------------------------------------------------------
-
-    if not location_exists(
-        con,
-        location
-    ):
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                f"Location {location} "
-                "does not exist."
-            )
-        ), 400
-
-    # --------------------------------------------------------
-    # PALLET ALREADY IN?
-    # --------------------------------------------------------
-
-    existing = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE pallet_id=?
-        """,
-        (pallet_id,)
-    ).fetchone()
+    /*
+        We use ZXing here because it performs much better
+        on the pallet QR/barcode labels being used in the
+        warehouse.
+    */
 
     if (
-        existing
-        and existing["status"] == "IN"
-    ):
+        typeof ZXingBrowser === "undefined" ||
+        !ZXingBrowser.BrowserMultiFormatReader
+    ) {
 
-        con.close()
+        if (reader) {
+            reader.innerHTML =
+                "<div class='error'>" +
+                "Scanner library did not load. Refresh the page and try again." +
+                "</div>";
+        }
 
-        return jsonify(
-            ok=False,
-            error=(
-                f"Pallet {pallet_id} "
-                f"is already at "
-                f"{existing['location']}."
-            )
-        ), 409
+        return;
+    }
 
-    # --------------------------------------------------------
-    # LOCATION OCCUPIED?
-    # --------------------------------------------------------
+    try {
 
-    occupied = con.execute(
-        """
-        SELECT pallet_id
-        FROM pallets
-        WHERE location=?
-        AND status='IN'
-        """,
-        (location,)
-    ).fetchone()
+        const codeReader =
+            new ZXingBrowser.BrowserMultiFormatReader();
 
-    if occupied:
+        scanner = codeReader;
 
-        con.close()
+        const devices =
+            await ZXingBrowser.BrowserCodeReader
+                .listVideoInputDevices();
 
-        return jsonify(
-            ok=False,
-            error=(
-                f"{location} is occupied "
-                f"by pallet "
-                f"{occupied['pallet_id']}."
-            )
-        ), 409
+        let selectedDeviceId = undefined;
 
-    timestamp = now()
+        if (devices && devices.length) {
 
-    # --------------------------------------------------------
-    # SAVE PALLET + QR INFORMATION
-    # --------------------------------------------------------
+            const backCamera =
+                devices.find(device => {
 
-    con.execute(
-        """
-        INSERT INTO pallets
-        (
-            pallet_id,
-            location,
-            status,
+                    const label =
+                        String(device.label || "")
+                            .toLowerCase();
 
-            product,
-            lot,
-            packing,
-            weight,
-            qty,
-            brand,
+                    return (
+                        label.includes("back") ||
+                        label.includes("rear") ||
+                        label.includes("environment")
+                    );
+                });
 
-            raw_qr,
+            if (backCamera) {
 
-            created_at,
-            updated_at
-        )
+                selectedDeviceId =
+                    backCamera.deviceId;
 
-        VALUES
-        (
-            ?,
-            ?,
-            'IN',
+            } else {
 
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
+                selectedDeviceId =
+                    devices[devices.length - 1]
+                        .deviceId;
+            }
+        }
 
-            ?,
+        scannerControls =
+            await codeReader.decodeFromVideoDevice(
+                selectedDeviceId,
+                "reader",
 
-            ?,
-            ?
-        )
+                (result, error, controls) => {
 
-        ON CONFLICT(pallet_id)
-        DO UPDATE SET
+                    if (!result) return;
 
-            location=excluded.location,
-            status='IN',
+                    const text =
+                        result.getText
+                            ? result.getText()
+                            : String(result.text || "");
 
-            product=excluded.product,
-            lot=excluded.lot,
-            packing=excluded.packing,
-            weight=excluded.weight,
-            qty=excluded.qty,
-            brand=excluded.brand,
+                    if (!text) return;
 
-            raw_qr=excluded.raw_qr,
+                    handleScan(text);
+                }
+            );
 
-            updated_at=excluded.updated_at
-        """,
-        (
-            pallet_id,
-            location,
+    } catch (error) {
 
-            parsed.get(
-                "product",
-                ""
-            ),
+        console.error(
+            "Camera scanner error:",
+            error
+        );
 
-            parsed.get(
-                "lot",
-                ""
-            ),
+        if (reader) {
 
-            parsed.get(
-                "packing",
-                ""
-            ),
+            reader.innerHTML =
+                "<div class='error'>" +
+                "Camera could not start. Make sure Safari/browser camera permission is enabled, then refresh the page." +
+                "</div>";
+        }
+    }
+}
 
-            parsed.get(
-                "weight",
-                ""
-            ),
 
-            parsed.get(
-                "qty",
-                ""
-            ),
+async function closeScanner() {
 
-            parsed.get(
-                "brand",
-                ""
-            ),
+    if (scannerControls) {
 
-            parsed.get(
-                "raw_qr",
-                ""
-            ),
+        try {
+            scannerControls.stop();
+        } catch (e) {}
 
-            timestamp,
-            timestamp
-        )
-    )
+        scannerControls = null;
+    }
 
-    old_location = ""
+    scanner = null;
 
-    if existing:
-        old_location = (
-            existing["location"]
-            or ""
-        )
+    const reader = $("reader");
 
-    con.execute(
-        """
-        INSERT INTO history
-        (
-            pallet_id,
-            action,
-            old_location,
-            new_location,
-            timestamp
-        )
-        VALUES
-        (
-            ?,
-            'IN',
-            ?,
-            ?,
-            ?
-        )
-        """,
-        (
-            pallet_id,
-            old_location,
-            location,
-            timestamp
-        )
-    )
+    if (reader) {
+        reader.innerHTML = "";
+    }
 
-    con.commit()
-    con.close()
+    const modal = $("scannerModal");
 
-    return jsonify(
-        ok=True,
+    if (modal) {
+        modal.classList.remove("show");
+    }
+}
 
-        message=(
-            f"{pallet_id} stored "
-            f"at {location}"
-        ),
 
-        pallet_id=pallet_id,
-        location=location,
+function handleScan(text) {
 
-        product=parsed.get(
-            "product",
-            ""
-        ),
+    text = String(text || "").trim();
 
-        lot=parsed.get(
+    if (!text || !scanTarget) {
+        return;
+    }
+
+    const target = $(scanTarget);
+
+    if (!target) {
+        closeScanner();
+        return;
+    }
+
+    /*
+        For pallet fields we keep the ENTIRE QR string.
+
+        The server will extract:
+        Pallet ID
+        Lot
+        Description
+        Packing
+        Weight
+        Qty
+        Brand
+    */
+
+    const palletFields = [
+        "inPallet",
+        "movePallet",
+        "outPallet",
+        "findPallet"
+    ];
+
+    if (palletFields.includes(scanTarget)) {
+
+        const parsed =
+            parsePalletQR(text);
+
+        target.value = text;
+
+        showScannedPalletInfo(
+            scanTarget,
+            parsed
+        );
+
+    } else {
+
+        target.value =
+            text.trim().toUpperCase();
+    }
+
+    if (navigator.vibrate) {
+        navigator.vibrate(100);
+    }
+
+    const currentTarget =
+        scanTarget;
+
+    closeScanner();
+
+    toast("✓ Scan captured");
+
+    /*
+        Automatically move to the next logical step.
+    */
+
+    if (currentTarget === "inPallet") {
+
+        setTimeout(() => {
+
+            const location =
+                $("inLocation");
+
+            if (location) {
+                location.focus();
+            }
+
+        }, 250);
+    }
+
+    if (currentTarget === "movePallet") {
+
+        setTimeout(() => {
+
+            const location =
+                $("moveLocation");
+
+            if (location) {
+                location.focus();
+            }
+
+        }, 250);
+    }
+
+    if (currentTarget === "findPallet") {
+
+        setTimeout(() => {
+            findPallet();
+        }, 250);
+    }
+}
+
+
+// ============================================================
+// SCANNED PALLET INFORMATION
+// ============================================================
+
+function showScannedPalletInfo(
+    targetId,
+    parsed
+) {
+
+    let containerId = null;
+
+    if (targetId === "inPallet") {
+        containerId = "inScanInfo";
+    }
+
+    if (targetId === "movePallet") {
+        containerId = "moveScanInfo";
+    }
+
+    if (targetId === "outPallet") {
+        containerId = "outScanInfo";
+    }
+
+    if (targetId === "findPallet") {
+        containerId = "findScanInfo";
+    }
+
+    if (!containerId) {
+        return;
+    }
+
+    let container =
+        $(containerId);
+
+    /*
+        If the HTML does not already contain the information
+        box, create it automatically.
+    */
+
+    if (!container) {
+
+        const target =
+            $(targetId);
+
+        if (!target) return;
+
+        const scanRow =
+            target.closest(".scanrow");
+
+        if (!scanRow) return;
+
+        container =
+            document.createElement("div");
+
+        container.id =
+            containerId;
+
+        container.className =
+            "scan-data-card";
+
+        scanRow.insertAdjacentElement(
+            "afterend",
+            container
+        );
+    }
+
+    container.innerHTML = `
+        <div class="scan-data-title">
+            ✓ Pallet Read
+        </div>
+
+        <div class="scan-data-grid">
+
+            <div>
+                <span>Pallet ID</span>
+                <b>${escapeHtml(parsed.pallet_id || "-")}</b>
+            </div>
+
+            <div>
+                <span>Lot</span>
+                <b>${escapeHtml(parsed.lot || "-")}</b>
+            </div>
+
+            <div>
+                <span>Description</span>
+                <b>${escapeHtml(parsed.product || "-")}</b>
+            </div>
+
+            <div>
+                <span>Packing</span>
+                <b>${escapeHtml(parsed.packing || "-")}</b>
+            </div>
+
+            <div>
+                <span>Weight</span>
+                <b>${escapeHtml(parsed.weight || "-")}</b>
+            </div>
+
+        </div>
+    `;
+}
+
+
+// ============================================================
+// PUT PALLET IN
+// ============================================================
+
+async function putIn() {
+
+    const pallet =
+        $("inPallet").value.trim();
+
+    const location =
+        $("inLocation")
+            .value
+            .trim()
+            .toUpperCase();
+
+    if (!pallet) {
+        toast("Scan pallet first.");
+        return;
+    }
+
+    if (!location) {
+        toast("Scan rack location.");
+        return;
+    }
+
+    try {
+
+        const data =
+            await api(
+                "/api/in",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        pallet_id: pallet,
+                        location: location
+                    })
+                }
+            );
+
+        toast(
+            "✓ " +
+            data.pallet_id +
+            " → " +
+            data.location
+        );
+
+        clearInput("inPallet");
+        clearInput("inLocation");
+
+        const scanInfo =
+            $("inScanInfo");
+
+        if (scanInfo) {
+            scanInfo.innerHTML = "";
+        }
+
+        await loadStats();
+        await loadLocations();
+
+        $("inPallet").focus();
+
+    } catch (error) {
+
+        alert(error.message);
+    }
+}
+
+
+// ============================================================
+// MOVE PALLET
+// ============================================================
+
+async function movePallet() {
+
+    const pallet =
+        $("movePallet")
+            .value
+            .trim();
+
+    const location =
+        $("moveLocation")
+            .value
+            .trim()
+            .toUpperCase();
+
+    if (!pallet || !location) {
+
+        toast(
+            "Scan pallet and new location."
+        );
+
+        return;
+    }
+
+    try {
+
+        const data =
+            await api(
+                "/api/move",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        pallet_id: pallet,
+                        location: location
+                    })
+                }
+            );
+
+        toast(
+            "✓ " +
+            data.pallet_id +
+            " moved to " +
+            data.location
+        );
+
+        clearInput("movePallet");
+        clearInput("moveLocation");
+
+        const scanInfo =
+            $("moveScanInfo");
+
+        if (scanInfo) {
+            scanInfo.innerHTML = "";
+        }
+
+        await loadStats();
+        await loadLocations();
+
+    } catch (error) {
+
+        alert(error.message);
+    }
+}
+
+
+// ============================================================
+// TAKE PALLET OUT
+// ============================================================
+
+async function takeOut() {
+
+    const pallet =
+        $("outPallet")
+            .value
+            .trim();
+
+    if (!pallet) {
+
+        toast("Scan pallet first.");
+        return;
+    }
+
+    try {
+
+        const data =
+            await api(
+                "/api/out",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        pallet_id: pallet
+                    })
+                }
+            );
+
+        toast(
+            "✓ " +
+            data.pallet_id +
+            " OUT"
+        );
+
+        clearInput("outPallet");
+
+        const scanInfo =
+            $("outScanInfo");
+
+        if (scanInfo) {
+            scanInfo.innerHTML = "";
+        }
+
+        await loadStats();
+        await loadLocations();
+
+    } catch (error) {
+
+        alert(error.message);
+    }
+}
+
+
+// ============================================================
+// FIND PALLET
+// ============================================================
+
+async function findPallet() {
+
+    const raw =
+        $("findPallet")
+            .value
+            .trim();
+
+    if (!raw) {
+
+        toast("Scan or enter pallet ID.");
+        return;
+    }
+
+    const parsed =
+        parsePalletQR(raw);
+
+    const palletId =
+        parsed.pallet_id;
+
+    const result =
+        $("findResult");
+
+    result.innerHTML =
+        "<div class='loading'>Searching...</div>";
+
+    try {
+
+        const data =
+            await api(
+                "/api/find/" +
+                encodeURIComponent(
+                    palletId
+                )
+            );
+
+        const pallet =
+            data.pallet;
+
+        let statusHtml;
+
+        if (pallet.status === "IN") {
+
+            statusHtml = `
+                <div class="status-in">
+                    IN WAREHOUSE
+                </div>
+            `;
+
+        } else {
+
+            statusHtml = `
+                <div class="status-out">
+                    OUT
+                </div>
+            `;
+        }
+
+        let historyHtml = "";
+
+        if (
+            data.history &&
+            data.history.length
+        ) {
+
+            historyHtml =
+                "<h3>History</h3>";
+
+            historyHtml +=
+                "<div class='history-list'>";
+
+            data.history.forEach(
+                item => {
+
+                    historyHtml += `
+                        <div class="history-item">
+
+                            <b>
+                                ${escapeHtml(item.action)}
+                            </b>
+
+                            <span>
+                                ${escapeHtml(item.old_location || "")}
+                                ${item.new_location ? " → " + escapeHtml(item.new_location) : ""}
+                            </span>
+
+                            <small>
+                                ${escapeHtml(item.timestamp || "")}
+                            </small>
+
+                        </div>
+                    `;
+                }
+            );
+
+            historyHtml +=
+                "</div>";
+        }
+
+        result.innerHTML = `
+
+            <div class="pallet-result">
+
+                ${statusHtml}
+
+                <div class="result-location">
+                    ${escapeHtml(
+                        pallet.location ||
+                        "No current location"
+                    )}
+                </div>
+
+                <div class="result-grid">
+
+                    <div>
+                        <span>Pallet ID</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.pallet_id
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Lot</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.lot || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Description</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.product || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Packing</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.packing || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Weight</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.weight || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Status</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.status
+                            )}
+                        </b>
+                    </div>
+
+                </div>
+
+                ${historyHtml}
+
+            </div>
+        `;
+
+    } catch (error) {
+
+        result.innerHTML = `
+            <div class="error">
+                ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+
+// ============================================================
+// LOCATION SEARCH
+// ============================================================
+
+async function findLocation() {
+
+    const location =
+        $("locationSearch")
+            .value
+            .trim()
+            .toUpperCase();
+
+    const result =
+        $("locationResult");
+
+    if (!location) {
+
+        toast(
+            "Scan or enter rack location."
+        );
+
+        return;
+    }
+
+    result.innerHTML =
+        "<div class='loading'>Checking...</div>";
+
+    try {
+
+        const data =
+            await api(
+                "/api/location/" +
+                encodeURIComponent(location)
+            );
+
+        if (!data.pallet) {
+
+            result.innerHTML = `
+
+                <div class="location-free">
+
+                    <h3>
+                        ${escapeHtml(location)}
+                    </h3>
+
+                    <div class="available-badge">
+                        AVAILABLE
+                    </div>
+
+                </div>
+            `;
+
+            return;
+        }
+
+        const pallet =
+            data.pallet;
+
+        result.innerHTML = `
+
+            <div class="location-occupied">
+
+                <h3>
+                    ${escapeHtml(location)}
+                </h3>
+
+                <div class="occupied-badge">
+                    OCCUPIED
+                </div>
+
+                <div class="result-grid">
+
+                    <div>
+                        <span>Pallet</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.pallet_id
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Lot</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.lot || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Description</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.product || "-"
+                            )}
+                        </b>
+                    </div>
+
+                    <div>
+                        <span>Packing</span>
+                        <b>
+                            ${escapeHtml(
+                                pallet.packing || "-"
+                            )}
+                        </b>
+                    </div>
+
+                </div>
+
+            </div>
+        `;
+
+    } catch (error) {
+
+        result.innerHTML = `
+            <div class="error">
+                ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+
+// ============================================================
+// ADVANCED INVENTORY SEARCH
+// ============================================================
+
+async function searchInventory() {
+
+    const params =
+        new URLSearchParams();
+
+    const fields = {
+
+        searchPallet:
+            "pallet_id",
+
+        searchLot:
             "lot",
-            ""
-        ),
 
-        packing=parsed.get(
-            "packing",
-            ""
-        ),
-
-        weight=parsed.get(
-            "weight",
-            ""
-        ),
-
-        qty=parsed.get(
-            "qty",
-            ""
-        ),
-
-        brand=parsed.get(
-            "brand",
-            ""
-        )
-    )
-
-
-# ============================================================
-# MOVE PALLET
-# ============================================================
-
-@app.post("/api/move")
-def move():
-
-    body = request.get_json(
-        force=True
-    )
-
-    pallet_id = clean_pallet_id(
-        body.get(
-            "pallet_id",
-            ""
-        )
-    )
-
-    location = (
-        body.get(
-            "location"
-        )
-        or ""
-    ).strip().upper()
-
-    con = db()
-
-    row = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE pallet_id=?
-        """,
-        (pallet_id,)
-    ).fetchone()
-
-    if (
-        not row
-        or row["status"] != "IN"
-    ):
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                "Pallet is not currently "
-                "IN the warehouse."
-            )
-        ), 404
-
-    if not location_exists(
-        con,
-        location
-    ):
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                f"Location {location} "
-                "does not exist."
-            )
-        ), 400
-
-    if location == row["location"]:
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                "That pallet is already "
-                "at this location."
-            )
-        ), 409
-
-    occupied = con.execute(
-        """
-        SELECT pallet_id
-        FROM pallets
-        WHERE location=?
-        AND status='IN'
-        AND pallet_id<>?
-        """,
-        (
-            location,
-            pallet_id
-        )
-    ).fetchone()
-
-    if occupied:
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                f"{location} is occupied "
-                f"by pallet "
-                f"{occupied['pallet_id']}."
-            )
-        ), 409
-
-    timestamp = now()
-
-    con.execute(
-        """
-        UPDATE pallets
-        SET location=?,
-            updated_at=?
-        WHERE pallet_id=?
-        """,
-        (
-            location,
-            timestamp,
-            pallet_id
-        )
-    )
-
-    con.execute(
-        """
-        INSERT INTO history
-        (
-            pallet_id,
-            action,
-            old_location,
-            new_location,
-            timestamp
-        )
-        VALUES
-        (
-            ?,
-            'MOVE',
-            ?,
-            ?,
-            ?
-        )
-        """,
-        (
-            pallet_id,
-            row["location"],
-            location,
-            timestamp
-        )
-    )
-
-    con.commit()
-    con.close()
-
-    return jsonify(
-        ok=True,
-
-        message=(
-            f"{pallet_id} moved "
-            f"to {location}"
-        ),
-
-        pallet_id=pallet_id,
-        location=location
-    )
-
-
-# ============================================================
-# TAKE PALLET OUT
-# ============================================================
-
-@app.post("/api/out")
-def take_out():
-
-    body = request.get_json(
-        force=True
-    )
-
-    pallet_id = clean_pallet_id(
-        body.get(
-            "pallet_id",
-            ""
-        )
-    )
-
-    con = db()
-
-    row = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE pallet_id=?
-        """,
-        (pallet_id,)
-    ).fetchone()
-
-    if (
-        not row
-        or row["status"] != "IN"
-    ):
-
-        con.close()
-
-        return jsonify(
-            ok=False,
-            error=(
-                "Pallet is not currently "
-                "IN the warehouse."
-            )
-        ), 404
-
-    timestamp = now()
-
-    old_location = row[
-        "location"
-    ]
-
-    con.execute(
-        """
-        UPDATE pallets
-        SET
-            status='OUT',
-            location=NULL,
-            updated_at=?
-        WHERE pallet_id=?
-        """,
-        (
-            timestamp,
-            pallet_id
-        )
-    )
-
-    con.execute(
-        """
-        INSERT INTO history
-        (
-            pallet_id,
-            action,
-            old_location,
-            new_location,
-            timestamp
-        )
-        VALUES
-        (
-            ?,
-            'OUT',
-            ?,
-            '',
-            ?
-        )
-        """,
-        (
-            pallet_id,
-            old_location,
-            timestamp
-        )
-    )
-
-    con.commit()
-    con.close()
-
-    return jsonify(
-        ok=True,
-
-        message=(
-            f"{pallet_id} taken OUT"
-        ),
-
-        pallet_id=pallet_id,
-        old_location=old_location
-    )
-
-
-# ============================================================
-# FIND ONE PALLET
-# ============================================================
-
-@app.get("/api/find/<path:pallet_id>")
-def find_pallet(
-    pallet_id
-):
-
-    pallet_id = clean_pallet_id(
-        pallet_id
-    )
-
-    con = db()
-
-    row = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE pallet_id=?
-        """,
-        (pallet_id,)
-    ).fetchone()
-
-    history = con.execute(
-        """
-        SELECT
-            action,
-            old_location,
-            new_location,
-            timestamp
-
-        FROM history
-
-        WHERE pallet_id=?
-
-        ORDER BY id DESC
-        """,
-        (pallet_id,)
-    ).fetchall()
-
-    con.close()
-
-    if not row:
-
-        return jsonify(
-            ok=False,
-            error="Pallet not found."
-        ), 404
-
-    return jsonify(
-        ok=True,
-        pallet=dict(row),
-        history=[
-            dict(x)
-            for x in history
-        ]
-    )
-
-
-# ============================================================
-# ADVANCED INVENTORY SEARCH / FILTER
-# ============================================================
-
-@app.get("/api/search")
-def search_inventory():
-
-    pallet_id = (
-        request.args.get(
-            "pallet_id",
-            ""
-        )
-        .strip()
-    )
-
-    lot = (
-        request.args.get(
-            "lot",
-            ""
-        )
-        .strip()
-    )
-
-    product = (
-        request.args.get(
+        searchProduct:
             "product",
-            ""
-        )
-        .strip()
-    )
 
-    packing = (
-        request.args.get(
+        searchPacking:
             "packing",
-            ""
-        )
-        .strip()
-    )
 
-    weight = (
-        request.args.get(
+        searchWeight:
             "weight",
-            ""
-        )
-        .strip()
-    )
 
-    location = (
-        request.args.get(
+        searchLocation:
             "location",
-            ""
-        )
-        .strip()
-    )
 
-    status = (
-        request.args.get(
-            "status",
-            "IN"
-        )
-        .strip()
-        .upper()
-    )
-
-    con = db()
+        searchStatus:
+            "status"
+    };
 
-    query = """
-        SELECT *
-        FROM pallets
-        WHERE 1=1
-    """
-
-    params = []
+    Object.entries(fields)
+        .forEach(
+            ([elementId, parameter]) => {
 
-    # --------------------------------------------------------
-    # STATUS
-    # --------------------------------------------------------
+                const element =
+                    $(elementId);
 
-    if status in (
-        "IN",
-        "OUT"
-    ):
+                if (!element) {
+                    return;
+                }
 
-        query += """
-            AND status=?
-        """
+                const value =
+                    element.value.trim();
 
-        params.append(
-            status
-        )
-
-    # status=ALL will return both
-
-    # --------------------------------------------------------
-    # PALLET ID
-    # --------------------------------------------------------
-
-    if pallet_id:
-
-        query += """
-            AND pallet_id
-            LIKE ?
-        """
-
-        params.append(
-            f"%{pallet_id}%"
-        )
-
-    # --------------------------------------------------------
-    # LOT
-    # --------------------------------------------------------
-
-    if lot:
-
-        query += """
-            AND lot
-            LIKE ?
-        """
-
-        params.append(
-            f"%{lot}%"
-        )
-
-    # --------------------------------------------------------
-    # PRODUCT / DESCRIPTION
-    # --------------------------------------------------------
-
-    if product:
-
-        query += """
-            AND product
-            LIKE ?
-        """
-
-        params.append(
-            f"%{product}%"
-        )
-
-    # --------------------------------------------------------
-    # PACKING
-    # --------------------------------------------------------
-
-    if packing:
-
-        query += """
-            AND packing
-            LIKE ?
-        """
-
-        params.append(
-            f"%{packing}%"
-        )
-
-    # --------------------------------------------------------
-    # WEIGHT
-    # --------------------------------------------------------
-
-    if weight:
-
-        query += """
-            AND weight
-            LIKE ?
-        """
-
-        params.append(
-            f"%{weight}%"
-        )
-
-    # --------------------------------------------------------
-    # LOCATION
-    # --------------------------------------------------------
-
-    if location:
-
-        query += """
-            AND location
-            LIKE ?
-        """
-
-        params.append(
-            f"%{location.upper()}%"
-        )
-
-    query += """
-        ORDER BY
-            CASE
-                WHEN location IS NULL
-                THEN 1
-                ELSE 0
-            END,
-            location,
-            pallet_id
-    """
-
-    rows = con.execute(
-        query,
-        params
-    ).fetchall()
-
-    con.close()
-
-    return jsonify(
-        ok=True,
-        count=len(rows),
-        pallets=[
-            dict(row)
-            for row in rows
-        ]
-    )
-
-
-# ============================================================
-# ALL CURRENT PALLETS
-# ============================================================
-
-@app.get("/api/pallets")
-def pallets():
-
-    con = db()
-
-    rows = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE status='IN'
-        ORDER BY
-            location,
-            pallet_id
-        """
-    ).fetchall()
-
-    con.close()
-
-    return jsonify(
-        [
-            dict(row)
-            for row in rows
-        ]
-    )
-
-
-# ============================================================
-# LOCATION DETAIL
-# ============================================================
-
-@app.get(
-    "/api/location/<path:loc>"
-)
-def location_detail(
-    loc
-):
-
-    loc = (
-        loc
-        .strip()
-        .upper()
-    )
-
-    con = db()
-
-    location = con.execute(
-        """
-        SELECT *
-        FROM locations
-        WHERE location_id=?
-        """,
-        (loc,)
-    ).fetchone()
-
-    pallet = con.execute(
-        """
-        SELECT *
-        FROM pallets
-        WHERE location=?
-        AND status='IN'
-        """,
-        (loc,)
-    ).fetchone()
-
-    con.close()
-
-    if not location:
-
-        return jsonify(
-            ok=False,
-            error="Location not found."
-        ), 404
-
-    return jsonify(
-        ok=True,
-
-        location=dict(
-            location
-        ),
-
-        pallet=(
-            dict(pallet)
-            if pallet
-            else None
-        )
-    )
-
-
-# ============================================================
-# ALL LOCATIONS
-# ============================================================
-
-@app.get("/api/locations")
-def locations():
-
-    con = db()
-
-    rows = con.execute(
-        """
-        SELECT
-
-            l.*,
-
-            p.pallet_id,
-            p.product,
-            p.lot,
-            p.packing,
-            p.weight,
-            p.qty,
-            p.brand
-
-        FROM locations l
-
-        LEFT JOIN pallets p
-            ON p.location=l.location_id
-            AND p.status='IN'
-
-        ORDER BY
-            l.room,
-            l.rack,
-            l.level,
-            l.position
-        """
-    ).fetchall()
-
-    con.close()
-
-    return jsonify(
-        [
-            dict(row)
-            for row in rows
-        ]
-    )
-
-
-# ============================================================
-# CSV EXPORT
-# ============================================================
-
-@app.get("/api/export")
-def export():
-
-    con = db()
-
-    rows = con.execute(
-        """
-        SELECT
-
-            pallet_id,
-            location,
-            status,
-
-            product,
-            lot,
-            packing,
-            weight,
-            qty,
-            brand,
-
-            raw_qr,
-
-            created_at,
-            updated_at
-
-        FROM pallets
-
-        ORDER BY
-            pallet_id
-        """
-    ).fetchall()
-
-    con.close()
-
-    output = io.StringIO()
-
-    writer = csv.writer(
-        output
-    )
-
-    writer.writerow(
-        [
-            "Pallet ID",
-            "Location",
-            "Status",
-            "Description",
-            "Lot",
-            "Packing",
-            "Weight",
-            "Qty",
-            "Brand",
-            "Raw QR",
-            "Created",
-            "Updated"
-        ]
-    )
-
-    for row in rows:
-        writer.writerow(
-            list(row)
-        )
-
-    return send_file(
-        io.BytesIO(
-            output
-            .getvalue()
-            .encode(
-                "utf-8-sig"
+                if (value) {
+
+                    params.append(
+                        parameter,
+                        value
+                    );
+                }
+            }
+        );
+
+    const result =
+        $("inventoryResults");
+
+    if (!result) {
+        return;
+    }
+
+    result.innerHTML =
+        "<div class='loading'>Searching inventory...</div>";
+
+    try {
+
+        const data =
+            await api(
+                "/api/search?" +
+                params.toString()
+            );
+
+        renderInventoryResults(
+            data.pallets || []
+        );
+
+    } catch (error) {
+
+        result.innerHTML = `
+            <div class="error">
+                ${escapeHtml(error.message)}
+            </div>
+        `;
+    }
+}
+
+
+function renderInventoryResults(
+    pallets
+) {
+
+    const result =
+        $("inventoryResults");
+
+    if (!result) {
+        return;
+    }
+
+    if (!pallets.length) {
+
+        result.innerHTML = `
+            <div class="empty-result">
+                No pallets found.
+            </div>
+        `;
+
+        return;
+    }
+
+    let html = `
+
+        <div class="inventory-count">
+            ${pallets.length}
+            pallet${pallets.length === 1 ? "" : "s"} found
+        </div>
+
+        <div class="inventory-list">
+    `;
+
+    pallets.forEach(
+        pallet => {
+
+            html += `
+
+                <div class="inventory-card">
+
+                    <div class="inventory-card-top">
+
+                        <div>
+                            <span class="inventory-label">
+                                PALLET
+                            </span>
+
+                            <b class="inventory-pallet">
+                                ${escapeHtml(
+                                    pallet.pallet_id
+                                )}
+                            </b>
+                        </div>
+
+                        <div class="inventory-location">
+                            ${escapeHtml(
+                                pallet.location ||
+                                "OUT"
+                            )}
+                        </div>
+
+                    </div>
+
+                    <div class="inventory-details">
+
+                        <div>
+                            <span>Lot</span>
+                            <b>
+                                ${escapeHtml(
+                                    pallet.lot || "-"
+                                )}
+                            </b>
+                        </div>
+
+                        <div>
+                            <span>Description</span>
+                            <b>
+                                ${escapeHtml(
+                                    pallet.product || "-"
+                                )}
+                            </b>
+                        </div>
+
+                        <div>
+                            <span>Packing</span>
+                            <b>
+                                ${escapeHtml(
+                                    pallet.packing || "-"
+                                )}
+                            </b>
+                        </div>
+
+                        <div>
+                            <span>Weight</span>
+                            <b>
+                                ${escapeHtml(
+                                    pallet.weight || "-"
+                                )}
+                            </b>
+                        </div>
+
+                    </div>
+
+                </div>
+            `;
+        }
+    );
+
+    html += "</div>";
+
+    result.innerHTML =
+        html;
+}
+
+
+function clearInventorySearch() {
+
+    [
+        "searchPallet",
+        "searchLot",
+        "searchProduct",
+        "searchPacking",
+        "searchWeight",
+        "searchLocation"
+    ].forEach(
+        id => {
+
+            const element =
+                $(id);
+
+            if (element) {
+                element.value = "";
+            }
+        }
+    );
+
+    const status =
+        $("searchStatus");
+
+    if (status) {
+        status.value = "IN";
+    }
+
+    searchInventory();
+}
+
+
+// ============================================================
+// STATS
+// ============================================================
+
+async function loadStats() {
+
+    try {
+
+        const data =
+            await api(
+                "/api/stats"
+            );
+
+        if ($("occupied")) {
+            $("occupied").textContent =
+                data.occupied;
+        }
+
+        if ($("available")) {
+            $("available").textContent =
+                data.available;
+        }
+
+        if ($("total")) {
+            $("total").textContent =
+                data.total_locations;
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Stats error:",
+            error
+        );
+    }
+}
+
+
+// ============================================================
+// LOCATION GRID
+// ============================================================
+
+async function loadLocations() {
+
+    const grid =
+        $("locationGrid");
+
+    if (!grid) {
+        return;
+    }
+
+    try {
+
+        const locations =
+            await api(
+                "/api/locations"
+            );
+
+        let html = "";
+
+        let currentRoom = null;
+        let currentRack = null;
+
+        locations.forEach(
+            location => {
+
+                if (
+                    currentRoom !==
+                    location.room
+                ) {
+
+                    if (
+                        currentRack !== null
+                    ) {
+
+                        html +=
+                            "</div></div>";
+                    }
+
+                    if (
+                        currentRoom !== null
+                    ) {
+
+                        html +=
+                            "</div>";
+                    }
+
+                    currentRoom =
+                        location.room;
+
+                    currentRack = null;
+
+                    html += `
+
+                        <div class="room-section">
+
+                            <h3>
+                                Room ${location.room}
+                            </h3>
+                    `;
+                }
+
+                if (
+                    currentRack !==
+                    location.rack
+                ) {
+
+                    if (
+                        currentRack !== null
+                    ) {
+
+                        html +=
+                            "</div></div>";
+                    }
+
+                    currentRack =
+                        location.rack;
+
+                    html += `
+
+                        <div class="rack-section">
+
+                            <h4>
+                                Rack ${location.rack}
+                            </h4>
+
+                            <div class="rack-grid">
+                    `;
+                }
+
+                const occupied =
+                    Boolean(
+                        location.pallet_id
+                    );
+
+                html += `
+
+                    <button
+                        class="location-cell ${occupied ? "occupied" : "available"}"
+                        onclick="openLocationFromGrid('${escapeHtml(location.location_id)}')"
+                    >
+
+                        <b>
+                            ${escapeHtml(
+                                location.location_id
+                            )}
+                        </b>
+
+                        <span>
+                            ${
+                                occupied
+                                ? escapeHtml(
+                                    location.pallet_id
+                                )
+                                : "Available"
+                            }
+                        </span>
+
+                    </button>
+                `;
+            }
+        );
+
+        if (
+            currentRack !== null
+        ) {
+
+            html +=
+                "</div></div>";
+        }
+
+        if (
+            currentRoom !== null
+        ) {
+
+            html +=
+                "</div>";
+        }
+
+        grid.innerHTML =
+            html;
+
+    } catch (error) {
+
+        grid.innerHTML = `
+            <div class="error">
+                Could not load warehouse locations.
+            </div>
+        `;
+    }
+}
+
+
+function openLocationFromGrid(
+    location
+) {
+
+    const search =
+        $("locationSearch");
+
+    if (search) {
+
+        search.value =
+            location;
+    }
+
+    findLocation();
+
+    window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+    });
+}
+
+
+// ============================================================
+// TABS
+// ============================================================
+
+function initializeTabs() {
+
+    document
+        .querySelectorAll(".tab")
+        .forEach(
+            button => {
+
+                button.addEventListener(
+                    "click",
+                    () => {
+
+                        document
+                            .querySelectorAll(".tab")
+                            .forEach(
+                                tab => {
+                                    tab.classList.remove(
+                                        "active"
+                                    );
+                                }
+                            );
+
+                        document
+                            .querySelectorAll(".page")
+                            .forEach(
+                                page => {
+                                    page.classList.remove(
+                                        "active"
+                                    );
+                                }
+                            );
+
+                        button.classList.add(
+                            "active"
+                        );
+
+                        const pageId =
+                            button.dataset.page;
+
+                        const page =
+                            $(pageId);
+
+                        if (page) {
+
+                            page.classList.add(
+                                "active"
+                            );
+                        }
+
+                        if (
+                            pageId ===
+                            "locations"
+                        ) {
+
+                            loadLocations();
+                        }
+
+                        if (
+                            pageId ===
+                            "inventory"
+                        ) {
+
+                            searchInventory();
+                        }
+                    }
+                );
+            }
+        );
+}
+
+
+// ============================================================
+// HARDWARE BARCODE SCANNERS
+// ============================================================
+
+/*
+    Zebra / Android handheld scanners normally behave
+    like keyboards and press ENTER after the barcode.
+
+    This lets the warehouse use those scanners without
+    opening the phone camera.
+*/
+
+document.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.key !==
+            "Enter"
+        ) {
+            return;
+        }
+
+        const active =
+            document.activeElement;
+
+        if (!active) {
+            return;
+        }
+
+        const id =
+            active.id;
+
+        if (
+            id === "inPallet"
+        ) {
+
+            event.preventDefault();
+
+            $("inLocation")
+                ?.focus();
+
+            return;
+        }
+
+        if (
+            id === "inLocation"
+        ) {
+
+            event.preventDefault();
+
+            putIn();
+
+            return;
+        }
+
+        if (
+            id === "movePallet"
+        ) {
+
+            event.preventDefault();
+
+            $("moveLocation")
+                ?.focus();
+
+            return;
+        }
+
+        if (
+            id === "moveLocation"
+        ) {
+
+            event.preventDefault();
+
+            movePallet();
+
+            return;
+        }
+
+        if (
+            id === "outPallet"
+        ) {
+
+            event.preventDefault();
+
+            takeOut();
+
+            return;
+        }
+
+        if (
+            id === "findPallet"
+        ) {
+
+            event.preventDefault();
+
+            findPallet();
+
+            return;
+        }
+
+        if (
+            id === "locationSearch"
+        ) {
+
+            event.preventDefault();
+
+            findLocation();
+
+            return;
+        }
+
+        if (
+            id &&
+            id.startsWith(
+                "search"
             )
-        ),
+        ) {
 
-        mimetype="text/csv",
+            event.preventDefault();
 
-        as_attachment=True,
+            searchInventory();
+        }
+    }
+);
 
-        download_name=(
-            "warehouse_inventory.csv"
+
+// ============================================================
+// CLOSE SCANNER BY CLICKING BACKDROP
+// ============================================================
+
+document.addEventListener(
+    "click",
+    event => {
+
+        const modal =
+            $("scannerModal");
+
+        if (
+            modal &&
+            event.target === modal
+        ) {
+
+            closeScanner();
+        }
+    }
+);
+
+
+// ============================================================
+// PAGE START
+// ============================================================
+
+document.addEventListener(
+    "DOMContentLoaded",
+    async () => {
+
+        initializeTabs();
+
+        await loadStats();
+        await loadLocations();
+
+        /*
+            If the inventory page exists,
+            load current inventory.
+        */
+
+        if (
+            $("inventoryResults")
+        ) {
+
+            searchInventory();
+        }
+    }
+);
+
+
+// ============================================================
+// SERVICE WORKER
+// ============================================================
+
+/*
+    IMPORTANT:
+
+    We intentionally unregister old service workers during
+    development so the phone does not keep loading an old
+    cached version of app.js.
+*/
+
+if (
+    "serviceWorker" in navigator
+) {
+
+    navigator
+        .serviceWorker
+        .getRegistrations()
+        .then(
+            registrations => {
+
+                registrations.forEach(
+                    registration => {
+
+                        registration.unregister();
+                    }
+                );
+            }
         )
-    )
+        .catch(
+            error => {
 
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.get("/health")
-def health():
-    return "OK", 200
-
-
-# ============================================================
-# START DATABASE
-# ============================================================
-
-init_db()
-
-
-# ============================================================
-# LOCAL SERVER
-# ============================================================
-
-if __name__ == "__main__":
-
-    app.run(
-        host="0.0.0.0",
-        port=int(
-            os.environ.get(
-                "PORT",
-                5000
-            )
-        ),
-        debug=False
-    )
+                console.log(
+                    "Service worker cleanup:",
+                    error
+                );
+            }
+        );
+}
