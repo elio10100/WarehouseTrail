@@ -2,33 +2,42 @@
 <html lang="en">
 
 <head>
-  <meta charset="utf-8">
 
-  <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1,maximum-scale=1"
-  >
+<meta charset="utf-8">
 
-  <meta
-    name="theme-color"
-    content="#111827"
-  >
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1,maximum-scale=1"
+>
 
-  <link
-    rel="manifest"
-    href="/static/manifest.json"
-  >
+<meta
+  name="theme-color"
+  content="#111827"
+>
 
-  <title>Warehouse Pallet Tracker</title>
+<link
+  rel="manifest"
+  href="/static/manifest.json"
+>
 
-  <link
-    rel="stylesheet"
-    href="/static/style.css"
-  >
+<title>
+  Warehouse Pallet Tracker
+</title>
+
+<link
+  rel="stylesheet"
+  href="/static/style.css"
+>
+
 </head>
 
 
 <body>
+
+
+<!-- ===================================================== -->
+<!-- HEADER -->
+<!-- ===================================================== -->
 
 <header>
 
@@ -57,413 +66,610 @@
 <main>
 
 
-  <!-- =========================
-       STATS
-  ========================== -->
+<!-- ===================================================== -->
+<!-- STATS -->
+<!-- ===================================================== -->
 
-  <section class="stats">
+<section class="stats">
 
-    <div>
-      <b id="occupied">0</b>
-      <span>Occupied</span>
-    </div>
+  <div>
+    <b id="occupied">0</b>
+    <span>Occupied</span>
+  </div>
 
-    <div>
-      <b id="available">0</b>
-      <span>Available</span>
-    </div>
+  <div>
+    <b id="available">0</b>
+    <span>Available</span>
+  </div>
 
-    <div>
-      <b id="total">0</b>
-      <span>Total Locations</span>
-    </div>
+  <div>
+    <b id="total">360</b>
+    <span>Total Locations</span>
+  </div>
 
-  </section>
-
-
-  <!-- =========================
-       NAVIGATION
-  ========================== -->
-
-  <nav class="tabs">
-
-    <button
-      class="tab active"
-      data-page="putin"
-    >
-      📥 IN
-    </button>
-
-    <button
-      class="tab"
-      data-page="move"
-    >
-      🔄 MOVE
-    </button>
-
-    <button
-      class="tab"
-      data-page="out"
-    >
-      📤 OUT
-    </button>
-
-    <button
-      class="tab"
-      data-page="find"
-    >
-      🔍 FIND
-    </button>
-
-    <button
-      class="tab"
-      data-page="locations"
-    >
-      📍 LOCATIONS
-    </button>
-
-  </nav>
+</section>
 
 
-  <!-- =========================
-       PALLET IN
-  ========================== -->
+<!-- ===================================================== -->
+<!-- NAVIGATION -->
+<!-- ===================================================== -->
 
-  <section
-    id="putin"
-    class="page active"
+<nav class="tabs">
+
+  <button
+    class="tab active"
+    data-page="putin"
   >
+    📥 IN
+  </button>
 
-    <div class="card">
+  <button
+    class="tab"
+    data-page="move"
+  >
+    🔄 MOVE
+  </button>
 
-      <h2>Put Pallet In</h2>
+  <button
+    class="tab"
+    data-page="out"
+  >
+    📤 OUT
+  </button>
 
-      <p>
-        Scan the pallet tag, then scan the rack location.
-      </p>
+  <button
+    class="tab"
+    data-page="find"
+  >
+    🔍 FIND
+  </button>
 
+  <button
+    class="tab"
+    data-page="locations"
+  >
+    📍 LOCATIONS
+  </button>
 
-      <label>
-        Pallet ID
-      </label>
-
-      <div class="scanrow">
-
-        <input
-          id="inPallet"
-          placeholder="Scan pallet"
-          autocomplete="off"
-        >
-
-        <button
-          class="scanbtn"
-          onclick="openScanner('inPallet')"
-        >
-          📷
-        </button>
-
-      </div>
+</nav>
 
 
-      <label>
-        Rack Location
-      </label>
+<!-- ===================================================== -->
+<!-- PUT PALLET IN -->
+<!-- ===================================================== -->
 
-      <div class="scanrow">
+<section
+  id="putin"
+  class="page active"
+>
 
-        <input
-          id="inLocation"
-          placeholder="Example: R1R2L2P4"
-          autocomplete="off"
-        >
+  <div class="card">
 
-        <button
-          class="scanbtn"
-          onclick="openScanner('inLocation')"
-        >
-          📷
-        </button>
+    <h2>
+      Put Pallet In
+    </h2>
 
-      </div>
+    <p>
+      Scan the pallet QR code. Product information will
+      automatically be read from the tag.
+    </p>
 
+
+    <label>
+      Pallet QR / ID
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="inPallet"
+        placeholder="Scan pallet QR"
+        autocomplete="off"
+      >
 
       <button
-        class="primary"
-        onclick="putIn()"
+        class="scanbtn"
+        onclick="openScanner('inPallet')"
       >
-        SAVE LOCATION
-      </button>
-
-
-      <div class="example">
-        Example:
-        <b>04730701</b>
-        →
-        <b>R1R2L2P4</b>
-      </div>
-
-    </div>
-
-  </section>
-
-
-  <!-- =========================
-       MOVE PALLET
-  ========================== -->
-
-  <section
-    id="move"
-    class="page"
-  >
-
-    <div class="card">
-
-      <h2>
-        Move Pallet
-      </h2>
-
-      <p>
-        Scan the pallet, then scan its new location.
-      </p>
-
-
-      <label>
-        Pallet ID
-      </label>
-
-      <div class="scanrow">
-
-        <input
-          id="movePallet"
-          placeholder="Scan pallet"
-          autocomplete="off"
-        >
-
-        <button
-          class="scanbtn"
-          onclick="openScanner('movePallet')"
-        >
-          📷
-        </button>
-
-      </div>
-
-
-      <label>
-        New Rack Location
-      </label>
-
-      <div class="scanrow">
-
-        <input
-          id="moveLocation"
-          placeholder="Scan new location"
-          autocomplete="off"
-        >
-
-        <button
-          class="scanbtn"
-          onclick="openScanner('moveLocation')"
-        >
-          📷
-        </button>
-
-      </div>
-
-
-      <button
-        class="primary"
-        onclick="movePallet()"
-      >
-        MOVE PALLET
+        📷
       </button>
 
     </div>
 
-  </section>
 
+    <!-- SCANNED PALLET INFORMATION -->
 
-  <!-- =========================
-       PALLET OUT
-  ========================== -->
+    <div
+      id="palletPreview"
+      class="pallet-preview"
+      style="display:none;"
+    >
 
-  <section
-    id="out"
-    class="page"
-  >
+      <h3>
+        📦 Pallet Information
+      </h3>
 
-    <div class="card">
+      <div class="info-grid">
 
-      <h2>
-        Take Pallet Out
-      </h2>
+        <div class="info-item">
+          <span>Pallet ID</span>
+          <b id="previewPallet">—</b>
+        </div>
 
-      <p>
-        Scan the pallet and confirm OUT.
-      </p>
+        <div class="info-item">
+          <span>Lot</span>
+          <b id="previewLot">—</b>
+        </div>
 
+        <div class="info-item">
+          <span>Description</span>
+          <b id="previewProduct">—</b>
+        </div>
 
-      <label>
-        Pallet ID
-      </label>
+        <div class="info-item">
+          <span>Packing</span>
+          <b id="previewPacking">—</b>
+        </div>
 
-      <div class="scanrow">
-
-        <input
-          id="outPallet"
-          placeholder="Scan pallet"
-          autocomplete="off"
-        >
-
-        <button
-          class="scanbtn"
-          onclick="openScanner('outPallet')"
-        >
-          📷
-        </button>
+        <div class="info-item">
+          <span>Weight</span>
+          <b id="previewWeight">—</b>
+        </div>
 
       </div>
 
+    </div>
+
+
+    <label>
+      Rack Location
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="inLocation"
+        placeholder="Example: R1R2L2P4"
+        autocomplete="off"
+      >
 
       <button
-        class="danger"
-        onclick="takeOut()"
+        class="scanbtn"
+        onclick="openScanner('inLocation')"
       >
-        TAKE OUT
+        📷
       </button>
 
     </div>
 
-  </section>
+
+    <button
+      class="primary"
+      onclick="putIn()"
+    >
+      SAVE LOCATION
+    </button>
 
 
-  <!-- =========================
-       FIND PALLET
-  ========================== -->
+    <div class="example">
 
-  <section
-    id="find"
-    class="page"
-  >
+      Example:
 
-    <div class="card">
+      <b>
+        04730905
+      </b>
 
-      <h2>
-        Find Pallet
-      </h2>
+      →
 
-      <p>
-        Scan a pallet to see its current location and history.
-      </p>
+      <b>
+        R1R2L2P4
+      </b>
+
+    </div>
+
+  </div>
+
+</section>
 
 
-      <label>
-        Pallet ID
-      </label>
+<!-- ===================================================== -->
+<!-- MOVE PALLET -->
+<!-- ===================================================== -->
 
-      <div class="scanrow">
+<section
+  id="move"
+  class="page"
+>
 
-        <input
-          id="findPallet"
-          placeholder="Scan pallet"
-          autocomplete="off"
-        >
+  <div class="card">
 
-        <button
-          class="scanbtn"
-          onclick="openScanner('findPallet')"
-        >
-          📷
-        </button>
+    <h2>
+      Move Pallet
+    </h2>
 
-      </div>
+    <p>
+      Scan the pallet QR code and then scan its new rack
+      location.
+    </p>
 
+
+    <label>
+      Pallet QR / ID
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="movePallet"
+        placeholder="Scan pallet"
+        autocomplete="off"
+      >
 
       <button
-        class="primary"
-        onclick="findPallet()"
+        class="scanbtn"
+        onclick="openScanner('movePallet')"
       >
-        FIND
+        📷
       </button>
-
-
-      <div id="findResult"></div>
 
     </div>
 
-  </section>
 
+    <label>
+      New Rack Location
+    </label>
 
-  <!-- =========================
-       LOCATIONS
-  ========================== -->
+    <div class="scanrow">
 
-  <section
-    id="locations"
-    class="page"
-  >
-
-    <div class="card">
-
-      <h2>
-        Warehouse Locations
-      </h2>
-
-      <p>
-        Scan a rack barcode or search by location.
-      </p>
-
-
-      <div class="scanrow">
-
-        <input
-          id="locationSearch"
-          placeholder="R1R2L2P4"
-          autocomplete="off"
-        >
-
-        <button
-          class="scanbtn"
-          onclick="openScanner('locationSearch')"
-        >
-          📷
-        </button>
-
-      </div>
-
+      <input
+        id="moveLocation"
+        placeholder="Scan new location"
+        autocomplete="off"
+      >
 
       <button
-        class="primary"
-        onclick="findLocation()"
+        class="scanbtn"
+        onclick="openScanner('moveLocation')"
       >
-        CHECK LOCATION
+        📷
       </button>
 
+    </div>
 
-      <div id="locationResult"></div>
+
+    <button
+      class="primary"
+      onclick="movePallet()"
+    >
+      MOVE PALLET
+    </button>
+
+  </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- TAKE PALLET OUT -->
+<!-- ===================================================== -->
+
+<section
+  id="out"
+  class="page"
+>
+
+  <div class="card">
+
+    <h2>
+      Take Pallet Out
+    </h2>
+
+    <p>
+      Scan the pallet QR code and confirm OUT.
+    </p>
+
+
+    <label>
+      Pallet QR / ID
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="outPallet"
+        placeholder="Scan pallet"
+        autocomplete="off"
+      >
+
+      <button
+        class="scanbtn"
+        onclick="openScanner('outPallet')"
+      >
+        📷
+      </button>
 
     </div>
 
 
-    <div class="card">
+    <button
+      class="danger"
+      onclick="takeOut()"
+    >
+      TAKE OUT
+    </button>
+
+  </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- FIND / INVENTORY SEARCH -->
+<!-- ===================================================== -->
+
+<section
+  id="find"
+  class="page"
+>
+
+  <div class="card">
+
+    <h2>
+      🔍 Inventory Search
+    </h2>
+
+    <p>
+      Scan a pallet or filter inventory by any of the fields
+      below.
+    </p>
+
+
+    <!-- PALLET ID -->
+
+    <label>
+      Pallet ID
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="searchPallet"
+        placeholder="Example: 04730905"
+        autocomplete="off"
+      >
+
+      <button
+        class="scanbtn"
+        onclick="openScanner('searchPallet')"
+      >
+        📷
+      </button>
+
+    </div>
+
+
+    <!-- LOT -->
+
+    <label>
+      Lot
+    </label>
+
+    <input
+      id="searchLot"
+      placeholder="Example: 2005"
+      autocomplete="off"
+    >
+
+
+    <!-- DESCRIPTION -->
+
+    <label>
+      Description
+    </label>
+
+    <input
+      id="searchProduct"
+      placeholder="Example: CARROT"
+      autocomplete="off"
+    >
+
+
+    <!-- PACKING -->
+
+    <label>
+      Packing
+    </label>
+
+    <input
+      id="searchPacking"
+      placeholder="Example: BAG"
+      autocomplete="off"
+    >
+
+
+    <!-- WEIGHT -->
+
+    <label>
+      Weight
+    </label>
+
+    <input
+      id="searchWeight"
+      placeholder="Example: 0"
+      autocomplete="off"
+    >
+
+
+    <!-- LOCATION -->
+
+    <label>
+      Rack Location
+    </label>
+
+    <div class="scanrow">
+
+      <input
+        id="searchLocation"
+        placeholder="Example: R1R2L2P4"
+        autocomplete="off"
+      >
+
+      <button
+        class="scanbtn"
+        onclick="openScanner('searchLocation')"
+      >
+        📷
+      </button>
+
+    </div>
+
+
+    <!-- STATUS -->
+
+    <label>
+      Status
+    </label>
+
+    <select id="searchStatus">
+
+      <option value="IN">
+        Currently In Warehouse
+      </option>
+
+      <option value="OUT">
+        Taken Out
+      </option>
+
+      <option value="ALL">
+        All Pallets
+      </option>
+
+    </select>
+
+
+    <button
+      class="primary"
+      onclick="searchInventory()"
+    >
+      🔍 SEARCH INVENTORY
+    </button>
+
+
+    <button
+      class="secondary"
+      onclick="clearInventorySearch()"
+    >
+      CLEAR FILTERS
+    </button>
+
+  </div>
+
+
+  <!-- SEARCH RESULTS -->
+
+  <div
+    id="inventoryResults"
+    class="card"
+    style="display:none;"
+  >
+
+    <div class="result-header">
 
       <h2>
-        Browse
+        Search Results
       </h2>
 
-      <div id="locationGrid"></div>
+      <b id="inventoryCount">
+        0 Pallets
+      </b>
 
     </div>
 
-  </section>
+    <div id="inventoryResultList">
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- LOCATIONS -->
+<!-- ===================================================== -->
+
+<section
+  id="locations"
+  class="page"
+>
+
+  <div class="card">
+
+    <h2>
+      Warehouse Locations
+    </h2>
+
+    <p>
+      Scan a rack barcode or search by location.
+    </p>
+
+
+    <div class="scanrow">
+
+      <input
+        id="locationSearch"
+        placeholder="R1R2L2P4"
+        autocomplete="off"
+      >
+
+      <button
+        class="scanbtn"
+        onclick="openScanner('locationSearch')"
+      >
+        📷
+      </button>
+
+    </div>
+
+
+    <button
+      class="primary"
+      onclick="findLocation()"
+    >
+      CHECK LOCATION
+    </button>
+
+
+    <div id="locationResult">
+    </div>
+
+  </div>
+
+
+  <div class="card">
+
+    <h2>
+      Browse Warehouse
+    </h2>
+
+    <p>
+      Green locations are available. Occupied locations show
+      the pallet currently stored there.
+    </p>
+
+    <div id="locationGrid">
+    </div>
+
+  </div>
+
+</section>
 
 
 </main>
 
 
-<!-- =========================
-     SCANNER
-========================== -->
+<!-- ===================================================== -->
+<!-- SCANNER MODAL -->
+<!-- ===================================================== -->
 
 <div
   id="scannerModal"
@@ -487,11 +693,12 @@
     </div>
 
 
-    <div id="reader"></div>
+    <div id="reader">
+    </div>
 
 
     <p class="scanhelp">
-      Point your phone camera at ONE barcode.
+      Point your phone camera at the barcode or QR code.
     </p>
 
   </div>
@@ -499,25 +706,30 @@
 </div>
 
 
-<!-- =========================
-     TOAST MESSAGE
-========================== -->
+<!-- ===================================================== -->
+<!-- TOAST -->
+<!-- ===================================================== -->
 
-<div id="toast"></div>
-
-
-<!-- =========================
-     ZXING BARCODE LIBRARY
-========================== -->
-
-<script src="https://unpkg.com/@zxing/browser@latest"></script>
+<div id="toast">
+</div>
 
 
-<!-- =========================
-     WAREHOUSE APP
-========================== -->
+<!-- ===================================================== -->
+<!-- BARCODE / QR LIBRARY -->
+<!-- ===================================================== -->
 
-<script src="/static/app.js"></script>
+<script
+  src="https://unpkg.com/@zxing/browser@latest"
+></script>
+
+
+<!-- ===================================================== -->
+<!-- APP JAVASCRIPT -->
+<!-- ===================================================== -->
+
+<script
+  src="/static/app.js?v=4"
+></script>
 
 
 </body>
